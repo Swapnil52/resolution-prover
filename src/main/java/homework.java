@@ -14,13 +14,15 @@ public class homework {
 
     //each expression is a list of expressions
     public static void main(String[] args) {
-        SentenceParser parser = new SentenceParser();
+        SentenceParser sentenceParser = new SentenceParser();
+        AlgebraParser algebraParser = new AlgebraParser();
 
-        String line = "~A(Akanksha, Potty) & B(Akanksha, Swapnil) | C(Mom, Dad) => D(Swapnil, Family)";
-        Sentence sentence = parser.parse(line.replaceAll("\\s", ""));
+        String line = "~A(Akanksha, Potty) & B(Akanksha, Swapnil) | C(Mom, Dad) & D(Swapnil, Family)";
+        Sentence sentence = sentenceParser.parse(line.replaceAll("\\s", ""));
         System.out.println(sentence);
+        System.out.println(algebraParser.negate(sentence));
 
-        System.out.println(parser.toPostfix(sentence));
+        System.out.println(sentenceParser.toPostfix(sentence));
     }
 
     public static class SentenceParser {
@@ -41,6 +43,9 @@ public class homework {
         }
 
         public Sentence toPostfix(Sentence sentence) {
+            if (sentence.isPostfix()) {
+                throw new IllegalArgumentException(String.format("Sentence %s is already in postfix", sentence));
+            }
             Stack<Operator> stack = new Stack<>();
             List<Expression> postfix = new ArrayList<>();
             for (Expression expression : sentence.getExpressions()) {
@@ -64,7 +69,7 @@ public class homework {
                 Operator next = stack.pop();
                 postfix.add(next);
             }
-            return new Sentence(postfix);
+            return new Sentence(postfix, true);
         }
 
         private int parseOperator(String sentence, List<Expression> expressions, int currentIndex) {
@@ -98,6 +103,46 @@ public class homework {
             expressions.add(predicate);
 
             return j + 1;
+        }
+    }
+
+    public static class AlgebraParser {
+
+        public Expression negate(Expression expression) {
+            ExpressionType type = expression.getType();
+            switch (type) {
+                case PREDICATE:
+                    return negatePredicate((Predicate) expression);
+                case OPERATOR:
+                    return negateOperator((Operator) expression);
+                case SENTENCE:
+                    return negateSentence((Sentence) expression);
+                default:
+                    throw new IllegalArgumentException(String.format("Expression of type %s cannot be negated", expression.getType()));
+            }
+        }
+
+        private Predicate negatePredicate(Predicate predicate) {
+            return new Predicate(predicate.getName(), predicate.getArguments(), !predicate.isNegated());
+        }
+
+        private Operator negateOperator(Operator operator) {
+            switch (operator) {
+                case OR:
+                    return Operator.AND;
+                case AND:
+                    return Operator.OR;
+                default:
+                    throw new IllegalArgumentException(String.format("Operator %s cannot be negated", operator));
+            }
+        }
+
+        private Sentence negateSentence(Sentence sentence) {
+            List<Expression> negatedExpressions = new ArrayList<>();
+            for (Expression _expression : sentence.getExpressions()) {
+                negatedExpressions.add(negate(_expression));
+            }
+            return new Sentence(negatedExpressions);
         }
     }
 
@@ -137,8 +182,8 @@ public class homework {
             return negated;
         }
 
-        public void setNegated(boolean negated) {
-            this.negated = negated;
+        public void negate() {
+            this.negated = !negated;
         }
 
         @Override
@@ -156,8 +201,16 @@ public class homework {
 
         private final List<Expression> expressions;
 
+        private boolean postfix;
+
         public Sentence(List<Expression> expressions) {
             this.expressions = expressions;
+            this.postfix = false;
+        }
+
+        public Sentence(List<Expression> expressions, boolean postfix) {
+            this.expressions = expressions;
+            this.postfix = postfix;
         }
 
         @Override
@@ -169,12 +222,22 @@ public class homework {
             return expressions;
         }
 
+        public boolean isPostfix() {
+            return postfix;
+        }
+
+        public void setPostfix(boolean postfix) {
+            this.postfix = postfix;
+        }
+
         @Override
         public String toString() {
             StringBuilder builder = new StringBuilder();
+            builder.append("(");
             for (Expression expression : expressions) {
                 builder.append(expression.toString());
             }
+            builder.append(")");
             return builder.toString();
         }
     }
