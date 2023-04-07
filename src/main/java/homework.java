@@ -2,6 +2,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.Stack;
 import java.util.function.Function;
@@ -14,42 +15,85 @@ public class homework {
 
     //each expression is a list of expressions
     public static void main(String[] args) {
-        SentenceParser sentenceParser = new SentenceParser();
-        AlgebraParser algebraParser = new AlgebraParser();
 
-        String line = "~A(Akanksha, Potty) & B(Akanksha, Swapnil) | C(Mom, Dad) & D(Swapnil, Family)";
-        Sentence sentence = sentenceParser.parse(line.replaceAll("\\s", ""));
-        System.out.println(sentence);
-        System.out.println(algebraParser.negate(sentence));
-
-        System.out.println(sentenceParser.toPostfix(sentence));
     }
 
-    public static class SentenceParser {
+    public static class ExpressionParser {
 
-        public Sentence parse(String line) {
-            List<Expression> expressions = new ArrayList<>();
-            int i = 0;
-            while (i < line.length()) {
-                Character c = line.charAt(i);
-                if (Operator.isOperator(c)) {
-                    i = parseOperator(line, expressions, i);
-                }
-                else {
-                    i = parsePredicate(line, expressions, i, false);
-                }
-            }
-            return new Sentence(expressions);
+        private final Tokeniser tokeniser;
+
+        private final AlgebraHandler handler;
+
+        public ExpressionParser(Tokeniser tokeniser, AlgebraHandler handler) {
+            this.tokeniser = tokeniser;
+            this.handler = handler;
         }
 
-        public Sentence toPostfix(Sentence sentence) {
-            if (sentence.isPostfix()) {
-                throw new IllegalArgumentException(String.format("Sentence %s is already in postfix", sentence));
+        public Expression fromString(String line) {
+            List<Atom> atoms = tokeniser.tokenise(line);
+            return fromAtoms(atoms);
+        }
+
+        /**
+         * Sentence will be nested at most once
+         */
+        public Expression toCNF(Expression expression) {
+           if (expression.getType() == ExpressionType.OPERATOR) {
+               return expression;
+           }
+           if (expression.getType() == ExpressionType.PREDICATE) {
+               return expression;
+           }
+           Sentence sentence = (Sentence) expression;
+           List<Expression> postfixExpressions = toPostfix(sentence.getExpressions());
+           Stack<Expression> stack = new Stack<>();
+            for (Expression postfix : postfixExpressions) {
+                switch (postfix.getType()) {
+                    case PREDICATE:
+                    case SENTENCE:
+                        stack.add(postfix);
+                        break;
+                    case OPERATOR:
+                        Expression second = stack.pop();
+                        Expression first = stack.pop();
+
+                }
             }
+            return null;
+        }
+        
+        /**
+         * Generates a sentence from a list of atoms
+         */
+        private Expression fromAtoms(List<Atom> atoms) {
+            List<Expression> expressions = new ArrayList<>(atoms);
+            Stack<Expression> stack = new Stack<>();
+            List<Expression> postfix = toPostfix(expressions);
+            for (Expression expression : postfix) {
+                switch (expression.getType()) {
+                    case PREDICATE:
+                        stack.add(expression);
+                        break;
+                    case OPERATOR:
+                        Operator operator = (Operator) expression;
+                        Expression first = stack.pop();
+                        Expression second = stack.pop();
+                        Sentence next = new Sentence(Arrays.asList(second, operator, first));
+                        stack.add(next);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(String.format("Expression type %s is not an atom", expression.getType()));
+                }
+            }
+            return stack.pop();
+        }
+
+        private List<Expression> toPostfix(List<Expression> expressions) {
             Stack<Operator> stack = new Stack<>();
             List<Expression> postfix = new ArrayList<>();
-            for (Expression expression : sentence.getExpressions()) {
+            for (Expression expression : expressions) {
                 switch (expression.getType()) {
+                    case SENTENCE:
                     case PREDICATE:
                         postfix.add(expression);
                         break;
@@ -69,10 +113,28 @@ public class homework {
                 Operator next = stack.pop();
                 postfix.add(next);
             }
-            return new Sentence(postfix, true);
+            return postfix;
+        }
+    }
+
+    public static class Tokeniser {
+
+        public List<Atom> tokenise(String line) {
+            List<Atom> expressions = new ArrayList<>();
+            int i = 0;
+            while (i < line.length()) {
+                Character c = line.charAt(i);
+                if (Operator.isOperator(c)) {
+                    i = parseOperator(line, expressions, i);
+                }
+                else {
+                    i = parsePredicate(line, expressions, i, false);
+                }
+            }
+            return expressions;
         }
 
-        private int parseOperator(String sentence, List<Expression> expressions, int currentIndex) {
+        private int parseOperator(String sentence, List<Atom> expressions, int currentIndex) {
             Operator operator = Operator.from(sentence.charAt(currentIndex));
             if (operator == Operator.NOT) {
                 currentIndex += operator.getLength();
@@ -82,7 +144,7 @@ public class homework {
             return currentIndex + operator.getLength();
         }
 
-        private int parsePredicate(String sentence, List<Expression> expressions, int currentIndex, boolean negated) {
+        private int parsePredicate(String sentence, List<Atom> expressions, int currentIndex, boolean negated) {
             int i;
             int j;
             String name;
@@ -106,7 +168,118 @@ public class homework {
         }
     }
 
-    public static class AlgebraParser {
+    public static class AlgebraHandler {
+
+        /**
+         * Conjuncts two operables in CNF form and returns the result in CNF form
+         */
+        public Expression and(Operable first, Operable second) {
+            Expression flattenedFirst = flatten2(first);
+            Expression flattenedSecond = flatten2(second);
+            Sentence conjunction = new Sentence(Arrays.asList(flattenedFirst, Operator.AND, flattenedSecond));
+            return flatten2(conjunction);
+        }
+
+        Expression flatten2(Expression sentence) {
+            return flattenHelper(sentence).getExpression();
+        }
+
+        private FlattenResult flattenHelper(Expression expression) {
+            if (expression.getType() == ExpressionType.OPERATOR && expression != Operator.AND) {
+                throw new UnsupportedOperationException(String.format("Cannot flatten operator to CNF %s", expression));
+            }
+            if (expression == Operator.AND) {
+                return new FlattenResult(expression, false);
+            }
+            if (expression.getType() == ExpressionType.PREDICATE) {
+                return new FlattenResult(expression, false);
+            }
+            Sentence sentence = (Sentence) expression;
+            Sentence pureDisjunction = (Sentence) getPureDisjunction(sentence);
+            if (Objects.nonNull(pureDisjunction)) {
+                return new FlattenResult(pureDisjunction, true);
+            }
+            List<Expression> expressions = new ArrayList<>();
+            for (Expression sentenceExpression : sentence.getExpressions()) {
+                FlattenResult result = flattenHelper(sentenceExpression);
+                addFlattenedExpression(expressions, result);
+            }
+            return new FlattenResult(new Sentence(expressions), false);
+        }
+
+        private Operable getPureDisjunction(Sentence operable) {
+            try {
+                return getPureOperable(operable, Operator.OR);
+            }
+            catch (Exception ex) {
+                return null;
+            }
+        }
+
+        private Operable getPureOperable(Operable operable, Operator operator) {
+            if (operable.getType() == ExpressionType.PREDICATE) {
+                return operable;
+            }
+            List<Expression> pureExpressions = new ArrayList<>();
+            Sentence sentence = (Sentence) operable;
+            for (Expression expression : sentence.getExpressions()) {
+                if (expression == operator) {
+                    pureExpressions.add(expression);
+                    continue;
+                }
+                else if (expression == operator.complement()) {
+                    throw new IllegalStateException(String.format("Not a pure %s expression", operator));
+                }
+                Operable pure = getPureOperable((Operable) expression, operator);
+                if (pure.getType() == ExpressionType.PREDICATE) {
+                    pureExpressions.add(pure);
+                }
+                else {
+                    pureExpressions.addAll(((Sentence) pure).getExpressions());
+                }
+            }
+            return new Sentence(pureExpressions);
+        }
+
+        private static class FlattenResult {
+
+            private final Expression expression;
+
+            private final boolean disjunction;
+
+            public FlattenResult(Expression expression, Boolean disjunction) {
+                this.expression = expression;
+                this.disjunction = disjunction;
+            }
+
+            public Expression getExpression() {
+                return expression;
+            }
+
+            public boolean isDisjunction() {
+                return disjunction;
+            }
+        }
+
+        private void addFlattenedExpression(List<Expression> expressions, FlattenResult flattenResult) {
+            switch (flattenResult.getExpression().getType()) {
+                case OPERATOR:
+                case PREDICATE:
+                    expressions.add(flattenResult.getExpression());
+                    break;
+                case SENTENCE:
+                    Sentence sentence = (Sentence) flattenResult.getExpression();
+                    if (flattenResult.isDisjunction()) {
+                        expressions.add(sentence);
+                    }
+                    else {
+                        expressions.addAll(sentence.getExpressions());
+                    }
+                    break;
+                default:
+                    throw new UnsupportedOperationException(String.format("Expression of type %s not supported for flattening", flattenResult.getExpression()));
+            }
+        }
 
         public Expression negate(Expression expression) {
             ExpressionType type = expression.getType();
@@ -151,13 +324,21 @@ public class homework {
         ExpressionType getType();
     }
 
-    public static class Predicate implements Expression {
+    public interface Operable extends Expression {
+
+    }
+
+    public interface Atom extends Expression {
+
+    }
+
+    public static class Predicate implements Atom, Operable {
 
         private final String name;
 
         private final List<String> arguments;
 
-        private boolean negated;
+        private final boolean negated;
 
         public Predicate(String name, List<String> arguments, boolean negated) {
             this.name = name;
@@ -182,10 +363,6 @@ public class homework {
             return negated;
         }
 
-        public void negate() {
-            this.negated = !negated;
-        }
-
         @Override
         public String toString() {
             StringBuilder builder = new StringBuilder();
@@ -197,20 +374,12 @@ public class homework {
         }
     }
 
-    public static class Sentence implements Expression {
+    public static class Sentence implements Operable {
 
         private final List<Expression> expressions;
 
-        private boolean postfix;
-
         public Sentence(List<Expression> expressions) {
             this.expressions = expressions;
-            this.postfix = false;
-        }
-
-        public Sentence(List<Expression> expressions, boolean postfix) {
-            this.expressions = expressions;
-            this.postfix = postfix;
         }
 
         @Override
@@ -220,14 +389,6 @@ public class homework {
 
         public List<Expression> getExpressions() {
             return expressions;
-        }
-
-        public boolean isPostfix() {
-            return postfix;
-        }
-
-        public void setPostfix(boolean postfix) {
-            this.postfix = postfix;
         }
 
         @Override
@@ -246,10 +407,10 @@ public class homework {
 
         PREDICATE,
         OPERATOR,
-        SENTENCE;
+        SENTENCE
     }
 
-    public enum Operator implements Expression {
+    public enum Operator implements Atom {
 
         NOT('~', "~", 1, 3),
         AND('&', "&", 1, 2),
@@ -308,6 +469,17 @@ public class homework {
 
         public int getPrecedence() {
             return precedence;
+        }
+
+        public Operator complement() {
+            switch (this) {
+                case OR:
+                    return AND;
+                case AND:
+                    return OR;
+                default:
+                    throw new UnsupportedOperationException(String.format("Complement not supported for operator %s", this));
+            }
         }
 
         @Override
