@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HomeworkTest {
 
@@ -57,6 +59,33 @@ class HomeworkTest {
         assertEquals("((~A(x)&~B(y))|(~C(x)&D(x)))", algebraHandler.negate(getSentence(getSentence("A(x)|B(y)"), homework.Operator.AND, getSentence("C(x)|~D(x)"))).toString());
     }
 
+    @Test
+    void testToCNFWorksAsExpected() {
+        assertEquals("A(x)", expressionParser.toCNF(getPredicate("A")).toString());
+        assertEquals("((A(x)|B(x)))", expressionParser.toCNF(getSentence("A(x)|B(x)")).toString());
+        assertEquals("(A(x)&B(x)&C(x))", expressionParser.toCNF(getSentence("A(x)&B(x)&C(x)")).toString());
+        assertEquals("((A(x)|B(x))&(A(x)|C(x)))", expressionParser.toCNF(getSentence("A(x)|B(x)&C(x)")).toString());
+        assertEquals("((~A(x)|C(x))&(~B(x)|C(x)))", expressionParser.toCNF(getSentence(getSentence("~A(x)&~B(x)"), homework.Operator.OR, getPredicate("C"))).toString());
+        assertEquals("((~A(x)|C(x))&(~B(x)|C(x)))", expressionParser.toCNF(getSentence("A(x)|B(x)=>C(x)")).toString());
+        assertEquals("((~A(x)|~B(x)|D(x))&(~C(x)|D(x)))", expressionParser.toCNF(getSentence("A(x)&B(x)|C(x)=>D(x)")).toString());
+        assertEquals("((~A(x)|~B(x)|D(x)|E(x))&(~C(x)|D(x)|E(x)))", expressionParser.toCNF(getSentence("A(x)&B(x)|C(x)=>D(x)|E(x)")).toString());
+        assertEquals("((~A(x)|~B(x)|D(x))&(~A(x)|~B(x)|E(x))&(~C(x)|D(x))&(~C(x)|E(x)))", expressionParser.toCNF(getSentence("A(x)&B(x)|C(x)=>D(x)&E(x)")).toString());
+    }
+
+    @Test
+    void testIsCNFWorksAsExpected() {
+        assertFalse(algebraHandler.isCNF(homework.Operator.IMPLIES));
+        assertFalse(algebraHandler.isCNF(homework.Operator.OR));
+        assertTrue(algebraHandler.isCNF(homework.Operator.AND));
+        assertTrue(algebraHandler.isCNF(getPredicate("A")));
+        assertTrue(algebraHandler.isCNF(getSentence("A(x)|B(x)|C(x)")));
+        assertTrue(algebraHandler.isCNF(getSentence(getSentence(getOperable("A(x)|B(x)"), homework.Operator.AND, getOperable("C(x)|D(x)")))));
+        assertTrue(algebraHandler.isCNF(getSentence(getSentence(getOperable("A(x)&B(x)"), homework.Operator.AND, getOperable("C(x)&D(x)")))));
+        assertFalse(algebraHandler.isCNF(getSentence("A(x)=>D(x)")));
+        assertFalse(algebraHandler.isCNF(getSentence(getSentence(getOperable("A(x)&B(x)"), homework.Operator.OR, getOperable("C(x)&D(x)")))));
+        assertFalse(algebraHandler.isCNF(getSentence("A(x)&B(x)|C(x)=>D(x)")));
+    }
+
     private homework.Predicate getPredicate(String name) {
         return new homework.Predicate(name, Collections.singletonList("x"), false);
     }
@@ -65,8 +94,8 @@ class HomeworkTest {
         return (homework.Sentence) expressionParser.fromString(line);
     }
 
-    private homework.Operable getOperable(String line) {
-        return (homework.Operable) expressionParser.fromString(line);
+    private homework.Operand getOperable(String line) {
+        return (homework.Operand) expressionParser.fromString(line);
     }
 
     private homework.Sentence getSentence(homework.Expression... expressions) {
