@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HomeworkTest {
@@ -22,6 +23,17 @@ class HomeworkTest {
     }
 
     @Test
+    void testPredicateEqualityWorksAsExpected() {
+        homework.Predicate a = new homework.Predicate("Pred123", Collections.singletonList(new homework.Predicate.Variable("x")), false);
+        homework.Predicate b = new homework.Predicate("Pred123", Collections.singletonList(new homework.Predicate.Variable("x")), false);
+        assertEquals(a, b);
+
+        a = new homework.Predicate("Pred123", Collections.singletonList(new homework.Predicate.Variable("y")), false);
+        b = new homework.Predicate("Pred123", Collections.singletonList(new homework.Predicate.Variable("x")), false);
+        assertNotEquals(a, b);
+    }
+
+    @Test
     void tesParseWorksAsExpected() {
         homework.Sentence sentence = (homework.Sentence) expressionParser.fromString("A(x)|B(y)&D(z)|C(x)=>E(x)");
         assertEquals("(((A(x)|(B(y)&D(z)))|C(x))=>E(x))", sentence.toString());
@@ -29,7 +41,7 @@ class HomeworkTest {
 
     @Test
     void testFlattenWorksAsExpected() {
-        assertEquals("((A(x)|B(x))&(C(x)|D(x)))", algebraHandler.flatten(getSentence(getOperable("A(x)|B(x)"), homework.Operator.AND, getOperable("C(x)|D(x)"))).toString());
+        assertEquals("((Pred1234(x)|B(x))&(C(x)|D(x)))", algebraHandler.flatten(getSentence(getOperable("Pred1234(x)|B(x)"), homework.Operator.AND, getOperable("C(x)|D(x)"))).toString());
         assertEquals("((A(x)|B(x)))", algebraHandler.flatten(getSentence("A(x)|B(x)")).toString());
         assertEquals("((A(x)|B(x))&C(x))", algebraHandler.flatten(new homework.Sentence(getSentence("A(x)|B(x)"), homework.Operator.AND, getPredicate("C"))).toString());
         assertEquals("(A(x))", algebraHandler.flatten(getPredicate("A")).toString());
@@ -87,7 +99,7 @@ class HomeworkTest {
     }
 
     private homework.Predicate getPredicate(String name) {
-        return new homework.Predicate(name, Collections.singletonList("x"), false);
+        return new homework.Predicate(name, Collections.singletonList(new homework.Predicate.Variable("x")), false);
     }
 
     private homework.Sentence getSentence(String line) {

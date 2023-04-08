@@ -180,7 +180,7 @@ public class homework {
             int i;
             int j;
             String name;
-            List<String> arguments;
+            List<String> argumentNames;
 
             /* Parse predicate name */
             i = currentIndex;
@@ -190,13 +190,27 @@ public class homework {
             /* Parse argument names */
             i = j + 1;
             j = sentence.indexOf(CLOSE_BRACE, i);
-            arguments = Arrays.asList(sentence.substring(i, j).split(","));
+            argumentNames = Arrays.asList(sentence.substring(i, j).split(","));
 
             /* Add predicate to the expressions list */
-            Predicate predicate = new Predicate(name, arguments, negated);
+            Predicate predicate = new Predicate(name, parseArguments(argumentNames), negated);
             expressions.add(predicate);
 
             return j + 1;
+        }
+
+        private List<Predicate.Argument> parseArguments(List<String> names) {
+            return names.stream()
+                    .map(this::parseArgument)
+                    .collect(Collectors.toList());
+        }
+
+        private Predicate.Argument parseArgument(String name) {
+            char first = name.charAt(0);
+            if (Character.isUpperCase(first)) {
+                return new Predicate.Constant(name);
+            }
+            return new Predicate.Variable(name);
         }
     }
 
@@ -429,11 +443,11 @@ public class homework {
 
         private final String name;
 
-        private final List<String> arguments;
+        private final List<Argument> arguments;
 
         private final boolean negated;
 
-        public Predicate(String name, List<String> arguments, boolean negated) {
+        public Predicate(String name, List<Argument> arguments, boolean negated) {
             this.name = name;
             this.arguments = arguments;
             this.negated = negated;
@@ -448,7 +462,7 @@ public class homework {
             return name;
         }
 
-        public List<String> getArguments() {
+        public List<Argument> getArguments() {
             return arguments;
         }
 
@@ -462,8 +476,78 @@ public class homework {
             if (isNegated()) {
                 builder.append(Operator.NOT.getPrefix());
             }
-            builder.append(String.format("%s(%s)", name, String.join(",", arguments)));
+            builder.append(String.format("%s(%s)", name, arguments.stream().map(Argument::toString).collect(Collectors.joining(","))));
             return builder.toString();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Predicate predicate = (Predicate) o;
+            return negated == predicate.negated && name.equals(predicate.name) && arguments.equals(predicate.arguments);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(name, arguments, negated);
+        }
+
+        public static abstract class Argument {
+
+            private final String name;
+
+            private final ArgumentType argumentType;
+
+            protected Argument(String name, ArgumentType argumentType) {
+                this.name = name;
+                this.argumentType = argumentType;
+            }
+
+            public String getName() {
+                return name;
+            }
+
+            public ArgumentType getArgumentType() {
+                return argumentType;
+            }
+
+            @Override
+            public String toString() {
+                return getName();
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Argument argument = (Argument) o;
+                return name.equals(argument.name) && argumentType == argument.argumentType;
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(name, argumentType);
+            }
+        }
+
+        public static class Variable extends Argument {
+            public Variable(String name) {
+                super(name, ArgumentType.VARIABLE);
+            }
+        }
+
+        public static class Constant extends Argument {
+
+            public Constant(String name) {
+                super(name, ArgumentType.CONSTANT);
+            }
+        }
+
+        public enum ArgumentType {
+
+            CONSTANT,
+            VARIABLE
         }
     }
 
