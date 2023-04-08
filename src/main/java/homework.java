@@ -10,9 +10,6 @@ import java.util.stream.Collectors;
 
 public class homework {
 
-    private static final char OPEN_BRACE = '(';
-    private static final char CLOSE_BRACE = ')';
-
     public static void main(String[] args) {
 
     }
@@ -151,6 +148,9 @@ public class homework {
 
     public static class Tokeniser {
 
+        private static final char OPEN_BRACE = '(';
+        private static final char CLOSE_BRACE = ')';
+
         public List<Atom> tokenise(String line) {
             List<Atom> expressions = new ArrayList<>();
             int i = 0;
@@ -263,6 +263,13 @@ public class homework {
         }
 
         /**
+         * Negates a sentence in CNF and returns it in CNF form
+         */
+        public Expression negate(Operand operand) {
+            return negateHelper(operand);
+        }
+
+        /**
          * Flattens a CNF operable into a single sentence
          */
         Sentence flatten(Operand operand) {
@@ -334,26 +341,6 @@ public class homework {
             return new Sentence(pureExpressions);
         }
 
-        private static class FlattenResult {
-
-            private final Expression expression;
-
-            private final boolean disjunction;
-
-            public FlattenResult(Expression expression, Boolean disjunction) {
-                this.expression = expression;
-                this.disjunction = disjunction;
-            }
-
-            public Expression getExpression() {
-                return expression;
-            }
-
-            public boolean isDisjunction() {
-                return disjunction;
-            }
-        }
-
         private void addFlattenedExpression(List<Expression> expressions, FlattenResult flattenResult) {
             switch (flattenResult.getExpression().getType()) {
                 case OPERATOR:
@@ -374,14 +361,7 @@ public class homework {
             }
         }
 
-        /**
-         * Negates a sentence in CNF and returns it in CNF form
-         */
-        public Expression negate(Operand operand) {
-            return negateHelper(operand);
-        }
-
-        public Expression negateHelper(Operand operand) {
+        private Expression negateHelper(Operand operand) {
             ExpressionType type = operand.getType();
             switch (type) {
                 case PREDICATE:
@@ -409,6 +389,26 @@ public class homework {
                 }
             }
             return new Sentence(negatedExpressions);
+        }
+
+        private static class FlattenResult {
+
+            private final Expression expression;
+
+            private final boolean disjunction;
+
+            public FlattenResult(Expression expression, Boolean disjunction) {
+                this.expression = expression;
+                this.disjunction = disjunction;
+            }
+
+            public Expression getExpression() {
+                return expression;
+            }
+
+            public boolean isDisjunction() {
+                return disjunction;
+            }
         }
     }
 
