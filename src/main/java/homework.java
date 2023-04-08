@@ -54,12 +54,15 @@ public class homework {
                         stack.add(postfix);
                         break;
                     case OPERATOR:
-                        Expression second = stack.pop();
-                        Expression first = stack.pop();
-
+                        Operable second = (Operable) stack.pop();
+                        Operable first = (Operable) stack.pop();
+                        Operator operator = (Operator) postfix;
+                        Expression operated = handleOperator(first, second, operator);
+                        stack.add(handleOperator(first, second, operator));
+                        break;
                 }
             }
-            return null;
+            return stack.pop();
         }
         
         /**
@@ -114,6 +117,30 @@ public class homework {
                 postfix.add(next);
             }
             return postfix;
+        }
+
+        /**
+         * Operates on two expressions already in CNF
+         */
+        private Expression handleOperator(Operable first, Operable second, Operator operator) {
+            switch (operator) {
+                case AND:
+                    /* Join the two sentences by a conjunction */
+                    return handler.and(first, second);
+                case OR:
+                    /* Distribute */
+                    return handler.or(first, second);
+                case IMPLIES:
+                    /*
+                     * Negate first expression.
+                     * Or with the second expression
+                     * */
+                    Expression negated = handler.negate(first);
+                    Expression or = handler.or((Operable) negated, second);
+                    return toCNF(or);
+                default:
+                    throw new UnsupportedOperationException(String.format("Cannot apply operator %s on operables %s and %s", operator, first, second));
+            }
         }
     }
 
@@ -174,14 +201,53 @@ public class homework {
          * Conjuncts two operables in CNF form and returns the result in CNF form
          */
         public Expression and(Operable first, Operable second) {
-            Expression flattenedFirst = flatten2(first);
-            Expression flattenedSecond = flatten2(second);
-            Sentence conjunction = new Sentence(Arrays.asList(flattenedFirst, Operator.AND, flattenedSecond));
-            return flatten2(conjunction);
+            Sentence flattenedFirst = flatten(first);
+            Sentence flattenedSecond = flatten(second);
+            List<Expression> expressions = new ArrayList<>(flattenedFirst.getExpressions());
+            expressions.add(Operator.AND);
+            expressions.addAll(flattenedSecond.getExpressions());
+            return new Sentence(expressions);
         }
 
-        Expression flatten2(Expression sentence) {
-            return flattenHelper(sentence).getExpression();
+        /**
+         * Disjuncts two operables in CNF form and returns the result in CNF form
+         */
+        public Expression or(Operable first, Operable second) {
+            Sentence flattenedFirst = flatten(first);
+            Sentence flattenedSecond = flatten(second);
+            List<Expression> expressions = new ArrayList<>();
+            for (Expression a : flattenedFirst.getExpressions()) {
+                if (a == Operator.AND) {
+                    expressions.add(a);
+                }
+                else {
+                    for (Expression b : flattenedSecond.getExpressions()) {
+                        if (b == Operator.AND) {
+                            expressions.add(b);
+                        }
+                        else {
+                            Sentence disjunction = new Sentence(a, Operator.OR, b);
+                            expressions.add(disjunction);
+                        }
+                    }
+                }
+            }
+            return new Sentence(expressions);
+        }
+
+        /**
+         * Flattens a CNF operable into a single sentence
+         */
+        Sentence flatten(Operable operable) {
+            if (operable.getType() == ExpressionType.PREDICATE) {
+                return new Sentence(operable);
+            }
+            Sentence sentence = (Sentence) operable;
+            Sentence pureDisjunction = (Sentence) getPureDisjunction(sentence);
+            if (Objects.nonNull(pureDisjunction)) {
+                return new Sentence(pureDisjunction);
+            }
+            return (Sentence) flattenHelper(operable).getExpression();
         }
 
         private FlattenResult flattenHelper(Expression expression) {
@@ -281,17 +347,22 @@ public class homework {
             }
         }
 
-        public Expression negate(Expression expression) {
-            ExpressionType type = expression.getType();
+        /**
+         * Negates a sentence in CNF and returns it in CNF form
+         */
+        public Expression negate(Operable operable) {
+            return negateHelper(operable);
+        }
+
+        public Expression negateHelper(Operable operable) {
+            ExpressionType type = operable.getType();
             switch (type) {
                 case PREDICATE:
-                    return negatePredicate((Predicate) expression);
-                case OPERATOR:
-                    return negateOperator((Operator) expression);
+                    return negatePredicate((Predicate) operable);
                 case SENTENCE:
-                    return negateSentence((Sentence) expression);
+                    return negateSentence((Sentence) operable);
                 default:
-                    throw new IllegalArgumentException(String.format("Expression of type %s cannot be negated", expression.getType()));
+                    throw new IllegalArgumentException(String.format("Expression of type %s cannot be negated", operable.getType()));
             }
         }
 
@@ -299,21 +370,16 @@ public class homework {
             return new Predicate(predicate.getName(), predicate.getArguments(), !predicate.isNegated());
         }
 
-        private Operator negateOperator(Operator operator) {
-            switch (operator) {
-                case OR:
-                    return Operator.AND;
-                case AND:
-                    return Operator.OR;
-                default:
-                    throw new IllegalArgumentException(String.format("Operator %s cannot be negated", operator));
-            }
-        }
-
         private Sentence negateSentence(Sentence sentence) {
             List<Expression> negatedExpressions = new ArrayList<>();
             for (Expression _expression : sentence.getExpressions()) {
-                negatedExpressions.add(negate(_expression));
+                if (_expression.getType() == ExpressionType.OPERATOR) {
+                    Operator operator = (Operator) _expression;
+                    negatedExpressions.add(operator.complement());
+                }
+                else {
+                    negatedExpressions.add(negateHelper((Operable) _expression));
+                }
             }
             return new Sentence(negatedExpressions);
         }
@@ -380,6 +446,10 @@ public class homework {
 
         public Sentence(List<Expression> expressions) {
             this.expressions = expressions;
+        }
+
+        public Sentence(Expression... expressions) {
+            this.expressions = new ArrayList<>(Arrays.asList(expressions));
         }
 
         @Override
