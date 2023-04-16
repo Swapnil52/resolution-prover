@@ -5,10 +5,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HomeworkTest {
@@ -73,7 +75,7 @@ class HomeworkTest {
 
     @Test
     void testToCNFWorksAsExpected() {
-        assertEquals("A(x)", expressionParser.toCNF(getPredicate("A")).toString());
+        assertEquals("(A(x))", expressionParser.toCNF(getPredicate("A")).toString());
         assertEquals("((A(x)|B(x)))", expressionParser.toCNF(getSentence("A(x)|B(x)")).toString());
         assertEquals("(A(x)&B(x)&C(x))", expressionParser.toCNF(getSentence("A(x)&B(x)&C(x)")).toString());
         assertEquals("((A(x)|B(x))&(A(x)|C(x)))", expressionParser.toCNF(getSentence("A(x)|B(x)&C(x)")).toString());
@@ -98,8 +100,27 @@ class HomeworkTest {
         assertFalse(algebraHandler.isCNF(getSentence("A(x)&B(x)|C(x)=>D(x)")));
     }
 
+    @Test
+    void testCleanupWorksAsExpected() {
+        homework.Sentence sentence = getCNFSentence("A(x,y)|A(x,z)|A(x,y)");
+        assertEquals("(A(x,y)|A(x,z))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0)).toString());
+        sentence = (homework.Sentence) getCNFSentence("A(x,y)|A(x,z)|~A(x,y)").getExpressions().get(0);
+        assertNull(expressionParser.cleanup(sentence));
+    }
+
+    private homework.Sentence getCNFSentence(String line) {
+        return expressionParser.toCNF(getSentence(line));
+    }
+
     private homework.Predicate getPredicate(String name) {
         return new homework.Predicate(name, Collections.singletonList(new homework.Predicate.Variable("x")), false);
+    }
+
+    private homework.Predicate getPredicate(String name, boolean isNegated, String... variables) {
+        List<homework.Predicate.Argument> arguments = Arrays.stream(variables)
+                .map(homework.Predicate.Variable::new)
+                .collect(Collectors.toList());
+        return new homework.Predicate(name, arguments, isNegated);
     }
 
     private homework.Sentence getSentence(String line) {

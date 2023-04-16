@@ -1,5 +1,12 @@
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -11,6 +18,57 @@ import java.util.stream.Collectors;
 public class homework {
 
     public static void main(String[] args) {
+
+    }
+
+    public static class Constants {
+
+        public static final String INPUT_PATH = "input.txt";
+    }
+
+    public static class Configuration {
+
+        private final String query;
+
+        private final int size;
+
+        private final List<String> facts;
+
+        public static Configuration load() throws IOException {
+            String query;
+            int size;
+            List<String> facts = new ArrayList<>();
+            File file = new File(Constants.INPUT_PATH);
+            BufferedReader reader = new BufferedReader(new FileReader(file));
+            query = reader.readLine();
+            size = Integer.parseInt(reader.readLine());
+            for (int i = 0; i < size; i++) {
+                facts.add(reader.readLine());
+            }
+            reader.close();
+            return new Configuration(query, size, facts);
+        }
+
+        private Configuration(String query, int size, List<String> facts) {
+            this.size = size;
+            this.query = query;
+            this.facts = facts;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder builder = new StringBuilder();
+            builder.append(query);
+            builder.append(size);
+            for (String fact : facts) {
+                builder.append(String.format("%s\n", fact));
+            }
+            return builder.toString();
+        }
+    }
+
+    public static class KnowledgeBase {
+
 
     }
 
@@ -30,11 +88,8 @@ public class homework {
             return fromAtoms(atoms);
         }
 
-        public Expression toCNF(Operand operand) {
+        public Sentence toCNF(Operand operand) {
             if (handler.isCNF(operand)) {
-                if (operand.getType() == ExpressionType.PREDICATE) {
-                    return operand;
-                }
                 return handler.flatten(operand);
             }
             Sentence sentence = (Sentence) operand;
@@ -56,6 +111,37 @@ public class homework {
                 }
             }
             return handler.flatten((Operand) stack.pop());
+        }
+
+        public Sentence cleanup(Sentence disjunction) {
+            Map<String, Predicate> predicates = new HashMap<>();
+            for (Expression expression : disjunction.getExpressions()) {
+                if (expression == Operator.AND) {
+                    throw new IllegalArgumentException("Disjunction should not contain any ANDs");
+                }
+                else if (expression.getType() == ExpressionType.SENTENCE) {
+                    throw new IllegalArgumentException("Sentence must be a pure disjunction");
+                }
+                else if (expression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) expression;
+                    String key = predicate.getKey();
+                    Predicate existing = predicates.get(key);
+                    if (Objects.nonNull(existing) && existing.isNegation(predicate)) {
+                        return null;
+                    }
+                    else {
+                        predicates.put(key, predicate);
+                    }
+                }
+            }
+            List<Expression> expressions = new ArrayList<>();
+            Iterator<Predicate> iterator = predicates.values().iterator();
+            expressions.add(iterator.next());
+            while (iterator.hasNext()) {
+                expressions.add(Operator.OR);
+                expressions.add(iterator.next());
+            }
+            return new Sentence(expressions);
         }
 
         /**
@@ -216,7 +302,7 @@ public class homework {
 
     public static class AlgebraHandler {
 
-        public boolean isCNF(Expression expression) {
+        boolean isCNF(Expression expression) {
             if (expression.getType() == ExpressionType.OPERATOR && expression != Operator.AND) {
                 return false;
             }
@@ -286,7 +372,7 @@ public class homework {
         /**
          * Flattens a CNF operable into a single sentence
          */
-        Sentence flatten(Operand operand) {
+        public Sentence flatten(Operand operand) {
             if (operand.getType() == ExpressionType.PREDICATE) {
                 return new Sentence(operand);
             }
@@ -476,8 +562,12 @@ public class homework {
             if (isNegated()) {
                 builder.append(Operator.NOT.getPrefix());
             }
-            builder.append(String.format("%s(%s)", name, arguments.stream().map(Argument::toString).collect(Collectors.joining(","))));
+            builder.append(getKey());
             return builder.toString();
+        }
+
+        public String getKey() {
+            return String.format("%s(%s)", name, arguments.stream().map(Argument::toString).collect(Collectors.joining(",")));
         }
 
         @Override
@@ -485,12 +575,16 @@ public class homework {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             Predicate predicate = (Predicate) o;
-            return negated == predicate.negated && name.equals(predicate.name) && arguments.equals(predicate.arguments);
+            return name.equals(predicate.name) && arguments.equals(predicate.arguments);
+        }
+
+        public boolean isNegation(Predicate other) {
+            return equals(other) && negated == !other.isNegated();
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(name, arguments, negated);
+            return Objects.hash(name, arguments);
         }
 
         public static abstract class Argument {
