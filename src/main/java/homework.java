@@ -22,8 +22,6 @@ public class homework {
         AlgebraHandler handler = new AlgebraHandler();
         ExpressionParser parser = new ExpressionParser(tokeniser, handler);
         KnowledgeBase base = new KnowledgeBase(configuration, parser, handler);
-        base.initialise();
-
         System.out.println(base);
     }
 
@@ -93,23 +91,51 @@ public class homework {
 
         private final AlgebraHandler handler;
 
+        private final Map<String, Sentence> positives;
+
+        private final Map<String, Sentence> negatives;
+
         private final List<Sentence> disjunctions;
+
+        private int size;
 
         public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler) {
             this.configuration = configuration;
             this.parser = parser;
             this.handler = handler;
             this.disjunctions = new ArrayList<>();
+            this.positives = new HashMap<>();
+            this.negatives = new HashMap<>();
+            this.size = 0;
+            this.initialise();
         }
 
-        public void initialise() {
-            this.disjunctions.add(getNegatedQuery());
-            int index = 1;
+        private void initialise() {
+            index(getNegatedQuery());
             for (String fact : configuration.getFacts()) {
-                List<Sentence> disjunctions = getDisjunctions(fact, index);
-                this.disjunctions.addAll(disjunctions);
-                index += disjunctions.size();
+                List<Sentence> disjunctions = getDisjunctions(fact);
+                for (Sentence disjunction : disjunctions) {
+                    index(disjunction);
+                }
             }
+        }
+
+        private void index(Sentence disjunction) {
+            Sentence standardised = this.parser.standardise(disjunction, this.size);
+            this.disjunctions.add(standardised);
+            for (Expression expression : standardised.getExpressions()) {
+                if (expression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) expression;
+                    String name = predicate.getName();
+                    if (predicate.isNegated()) {
+                        this.negatives.put(name, standardised);
+                    }
+                    else {
+                        this.positives.put(name, standardised);
+                    }
+                }
+            }
+            this.size++;
         }
 
         private Sentence getNegatedQuery() {
@@ -118,10 +144,9 @@ public class homework {
             return handler.flatten(negation);
         }
 
-        private List<Sentence> getDisjunctions(String line, int index) {
-            Expression expression = parser.fromString(line);
-            Sentence cnf = parser.toCNF((Operand) expression);
-            return parser.getDisjunctions(cnf, index);
+        private List<Sentence> getDisjunctions(String line) {
+            Sentence cnf = parser.toCNF(line);
+            return parser.splitAndCleanup(cnf);
         }
 
         @Override
@@ -209,12 +234,12 @@ public class homework {
             this.handler = handler;
         }
 
-        public List<Sentence> getDisjunctions(Sentence cnf, int index) {
+        public List<Sentence> splitAndCleanup(Sentence cnf) {
             List<Sentence> disjunctions = new ArrayList<>();
             for (Expression cnfExpression : cnf.getExpressions()) {
                 if (cnfExpression.getType() == ExpressionType.OPERATOR) {
                     if (cnfExpression == Operator.OR) {
-                        throw new UnsupportedOperationException("Cannot get disjunctive operands from sentence");
+                        throw new UnsupportedOperationException(String.format("Sentence %s is not in CNF", cnf));
                     }
                     else {
                         continue;
@@ -222,18 +247,36 @@ public class homework {
                 }
                 if (cnfExpression.getType() == ExpressionType.PREDICATE) {
                     Predicate predicate = (Predicate) cnfExpression;
-                    Sentence disjunction = new Sentence(standardise(predicate, index));
+                    Sentence disjunction = new Sentence(predicate);
                     disjunctions.add(disjunction);
                 }
                 else if (cnfExpression.getType() == ExpressionType.SENTENCE) {
-                    Sentence cleanup = cleanup((Sentence) cnfExpression, index);
+                    Sentence cleanup = cleanup((Sentence) cnfExpression);
                     if (Objects.nonNull(cleanup)) {
                         disjunctions.add(cleanup);
                     }
                 }
-                index++;
             }
             return disjunctions;
+        }
+
+        public Sentence standardise(Sentence sentence, int index) {
+            for (int i = 0; i < sentence.getExpressions().size(); i++) {
+                Expression expression = sentence.getExpressions().get(i);
+                if (expression.getType() == ExpressionType.SENTENCE) {
+                    throw new IllegalArgumentException(String.format("Sentence %s is not a pure disjunction", sentence));
+                }
+                else if (expression.getType() == ExpressionType.PREDICATE) {
+                    sentence.getExpressions().set(i, standardise((Predicate) expression, index));
+                }
+            }
+            return sentence;
+        }
+
+        public Sentence toCNF(String line) {
+            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
+            Operand operand = (Operand) fromAtoms(atoms);
+            return toCNF(operand);
         }
 
         Expression fromString(String line) {
@@ -266,7 +309,7 @@ public class homework {
             return handler.flatten((Operand) stack.pop());
         }
 
-        Sentence cleanup(Sentence disjunction, int index) {
+        public Sentence cleanup(Sentence disjunction) {
             Map<String, Predicate> predicates = new HashMap<>();
             for (Expression expression : disjunction.getExpressions()) {
                 if (expression == Operator.AND) {
@@ -289,9 +332,9 @@ public class homework {
             }
             List<Expression> expressions = new ArrayList<>();
             Iterator<Predicate> iterator = predicates.values().iterator();
-            expressions.add(standardise(iterator.next(), index));
+            expressions.add(iterator.next());
             while (iterator.hasNext()) {
-                Predicate predicate = standardise(iterator.next(), index);
+                Predicate predicate = iterator.next();
                 expressions.add(Operator.OR);
                 expressions.add(predicate);
             }

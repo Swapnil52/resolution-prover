@@ -107,9 +107,9 @@ class HomeworkTest {
     @Test
     void testCleanupWorksAsExpected() {
         homework.Sentence sentence = getCNFSentence("A(x,y)|A(x,z)|A(x,y)");
-        assertEquals("(A(x0,y0)|A(x0,z0))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0), 0).toString());
+        assertEquals("(A(x,y)|A(x,z))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0)).toString());
         sentence = (homework.Sentence) getCNFSentence("A(x,y)|A(x,z)|~A(x,y)").getExpressions().get(0);
-        assertNull(expressionParser.cleanup(sentence, 0));
+        assertNull(expressionParser.cleanup(sentence));
     }
 
     @Test
