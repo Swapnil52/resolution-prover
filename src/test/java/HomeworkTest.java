@@ -103,9 +103,15 @@ class HomeworkTest {
     @Test
     void testCleanupWorksAsExpected() {
         homework.Sentence sentence = getCNFSentence("A(x,y)|A(x,z)|A(x,y)");
-        assertEquals("(A(x,y)|A(x,z))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0)).toString());
+        assertEquals("(A(x,y)|A(x,z))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0), 0).toString());
         sentence = (homework.Sentence) getCNFSentence("A(x,y)|A(x,z)|~A(x,y)").getExpressions().get(0);
-        assertNull(expressionParser.cleanup(sentence));
+        assertNull(expressionParser.cleanup(sentence, 0));
+    }
+
+    @Test
+    void testRandom() {
+        homework.Sentence sentence = getCNFSentence("Order(x,y)=>Seated(x)&Stocked(y)");
+        System.out.println(sentence);
     }
 
     private homework.Sentence getCNFSentence(String line) {

@@ -1,6 +1,5 @@
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -17,8 +16,15 @@ import java.util.stream.Collectors;
 
 public class homework {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
+        Configuration configuration = Configuration.load();
+        Tokeniser tokeniser = new Tokeniser();
+        AlgebraHandler handler = new AlgebraHandler();
+        ExpressionParser parser = new ExpressionParser(tokeniser, handler);
+        KnowledgeBase base = new KnowledgeBase(configuration, parser);
+        base.initialise();
 
+        System.out.println(base);
     }
 
     public static class Constants {
@@ -55,11 +61,23 @@ public class homework {
             this.facts = facts;
         }
 
+        public String getQuery() {
+            return query;
+        }
+
+        public int getSize() {
+            return size;
+        }
+
+        public List<String> getFacts() {
+            return facts;
+        }
+
         @Override
         public String toString() {
             StringBuilder builder = new StringBuilder();
-            builder.append(query);
-            builder.append(size);
+            builder.append(String.format("%s\n", query));
+            builder.append(String.format("%d\n", size));
             for (String fact : facts) {
                 builder.append(String.format("%s\n", fact));
             }
@@ -69,7 +87,41 @@ public class homework {
 
     public static class KnowledgeBase {
 
+        private final Configuration configuration;
 
+        private final ExpressionParser parser;
+
+        private final List<Sentence> disjunctions;
+
+        public KnowledgeBase(Configuration configuration, ExpressionParser parser) {
+            this.configuration = configuration;
+            this.parser = parser;
+            this.disjunctions = new ArrayList<>();
+        }
+
+        public void initialise() {
+            int index = 0;
+            for (String fact : configuration.getFacts()) {
+                List<Sentence> disjunctions = getDisjunctions(fact, index);
+                this.disjunctions.addAll(disjunctions);
+                index += disjunctions.size();
+            }
+        }
+
+        private List<Sentence> getDisjunctions(String line, int index) {
+            Expression expression = parser.fromString(line.replaceAll("\\s", ""));
+            Sentence cnf = parser.toCNF((Operand) expression);
+            return parser.getDisjunctions(cnf, index);
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder builder = new StringBuilder();
+            for (Sentence disjunction : disjunctions) {
+                builder.append(String.format("%s\n", disjunction.toString()));
+            }
+            return builder.toString();
+        }
     }
 
     public static class ExpressionParser {
@@ -83,12 +135,39 @@ public class homework {
             this.handler = handler;
         }
 
-        public Expression fromString(String line) {
+        public List<Sentence> getDisjunctions(Sentence cnf, int index) {
+            List<Sentence> disjunctions = new ArrayList<>();
+            for (Expression cnfExpression : cnf.getExpressions()) {
+                if (cnfExpression.getType() == ExpressionType.OPERATOR) {
+                    if (cnfExpression == Operator.OR) {
+                        throw new UnsupportedOperationException("Cannot get disjunctive operands from sentence");
+                    }
+                    else {
+                        continue;
+                    }
+                }
+                if (cnfExpression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) cnfExpression;
+                    Sentence disjunction = new Sentence(standardise(predicate, index));
+                    disjunctions.add(disjunction);
+                }
+                else if (cnfExpression.getType() == ExpressionType.SENTENCE) {
+                    Sentence cleanup = cleanup((Sentence) cnfExpression, index);
+                    if (Objects.nonNull(cleanup)) {
+                        disjunctions.add(cleanup);
+                    }
+                }
+                index++;
+            }
+            return disjunctions;
+        }
+
+        Expression fromString(String line) {
             List<Atom> atoms = tokeniser.tokenise(line);
             return fromAtoms(atoms);
         }
 
-        public Sentence toCNF(Operand operand) {
+        Sentence toCNF(Operand operand) {
             if (handler.isCNF(operand)) {
                 return handler.flatten(operand);
             }
@@ -113,7 +192,7 @@ public class homework {
             return handler.flatten((Operand) stack.pop());
         }
 
-        public Sentence cleanup(Sentence disjunction) {
+        Sentence cleanup(Sentence disjunction, int index) {
             Map<String, Predicate> predicates = new HashMap<>();
             for (Expression expression : disjunction.getExpressions()) {
                 if (expression == Operator.AND) {
@@ -136,12 +215,27 @@ public class homework {
             }
             List<Expression> expressions = new ArrayList<>();
             Iterator<Predicate> iterator = predicates.values().iterator();
-            expressions.add(iterator.next());
+            expressions.add(standardise(iterator.next(), index));
             while (iterator.hasNext()) {
+                Predicate predicate = standardise(iterator.next(), index);
                 expressions.add(Operator.OR);
-                expressions.add(iterator.next());
+                expressions.add(predicate);
             }
             return new Sentence(expressions);
+        }
+
+        private Predicate standardise(Predicate predicate, int index) {
+            List<Predicate.Argument> standardisedArguments = new ArrayList<>();
+            for (Predicate.Argument argument : predicate.getArguments()) {
+                if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
+                    standardisedArguments.add(argument);
+                }
+                else {
+                    String standardisedName = String.format("%s%d", argument.getName(), index);
+                    standardisedArguments.add(new Predicate.Variable(standardisedName));
+                }
+            }
+            return new Predicate(predicate.getName(), standardisedArguments, predicate.isNegated());
         }
 
         /**
