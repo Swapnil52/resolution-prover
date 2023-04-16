@@ -21,7 +21,7 @@ public class homework {
         Tokeniser tokeniser = new Tokeniser();
         AlgebraHandler handler = new AlgebraHandler();
         ExpressionParser parser = new ExpressionParser(tokeniser, handler);
-        KnowledgeBase base = new KnowledgeBase(configuration, parser);
+        KnowledgeBase base = new KnowledgeBase(configuration, parser, handler);
         base.initialise();
 
         System.out.println(base);
@@ -91,16 +91,20 @@ public class homework {
 
         private final ExpressionParser parser;
 
+        private final AlgebraHandler handler;
+
         private final List<Sentence> disjunctions;
 
-        public KnowledgeBase(Configuration configuration, ExpressionParser parser) {
+        public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler) {
             this.configuration = configuration;
             this.parser = parser;
+            this.handler = handler;
             this.disjunctions = new ArrayList<>();
         }
 
         public void initialise() {
-            int index = 0;
+            this.disjunctions.add(getNegatedQuery());
+            int index = 1;
             for (String fact : configuration.getFacts()) {
                 List<Sentence> disjunctions = getDisjunctions(fact, index);
                 this.disjunctions.addAll(disjunctions);
@@ -108,8 +112,14 @@ public class homework {
             }
         }
 
+        private Sentence getNegatedQuery() {
+            Predicate query = (Predicate) parser.fromString(configuration.getQuery());
+            Predicate negation = handler.negatePredicate(query);
+            return handler.flatten(negation);
+        }
+
         private List<Sentence> getDisjunctions(String line, int index) {
-            Expression expression = parser.fromString(line.replaceAll("\\s", ""));
+            Expression expression = parser.fromString(line);
             Sentence cnf = parser.toCNF((Operand) expression);
             return parser.getDisjunctions(cnf, index);
         }
@@ -121,6 +131,70 @@ public class homework {
                 builder.append(String.format("%s\n", disjunction.toString()));
             }
             return builder.toString();
+        }
+    }
+
+    public static class Unifier {
+
+        public Map<String, Predicate.Argument> getSubstitution(Predicate p, Predicate q) {
+            if (!p.getName().equals(q.getName())) {
+                throw new IllegalArgumentException(String.format("Cannot unify predicates with different names %s and %s", p, q));
+            }
+            if (p.getArguments().size() != q.getArguments().size()) {
+                throw new IllegalArgumentException(String.format("Cannot unify predicates with different number of arguments %s and %s", p, q));
+            }
+            try {
+                Map<String, Predicate.Argument> substitution = new HashMap<>();
+                for (int i = 0; i < p.getArguments().size(); i++) {
+                    Predicate.Argument a = p.getArguments().get(i);
+                    Predicate.Argument b = q.getArguments().get(i);
+                    if (a.getArgumentType() == Predicate.ArgumentType.CONSTANT && b.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
+                        handleConstantSubstitution((Predicate.Constant) a, (Predicate.Constant) b);
+                    }
+                    else if (a.getArgumentType() == Predicate.ArgumentType.VARIABLE) {
+                        handleVariableSubstitution((Predicate.Variable) a, b, substitution);
+                    }
+                    else if (b.getArgumentType() == Predicate.ArgumentType.VARIABLE) {
+                        handleVariableSubstitution((Predicate.Variable) b, a, substitution);
+                    }
+                }
+                return substitution;
+            } catch (Exception ex) {
+                return null;
+            }
+        }
+
+        public void apply(Sentence sentence, Map<String, Predicate.Argument> substitution) {
+            for (Expression expression : sentence.getExpressions()) {
+                if (expression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) expression;
+                    apply(predicate, substitution);
+                }
+            }
+        }
+
+        void apply(Predicate predicate, Map<String, Predicate.Argument> substitution) {
+            for (int i = 0; i < predicate.getArguments().size(); i++) {
+                Predicate.Argument argument = predicate.arguments.get(i);
+                if (argument.getArgumentType() == Predicate.ArgumentType.VARIABLE && substitution.containsKey(argument.getName())) {
+                    predicate.getArguments().set(i, substitution.get(argument.getName()));
+                }
+            }
+        }
+
+        private void handleConstantSubstitution(Predicate.Constant a, Predicate.Constant b) {
+            if (!a.getName().equals(b.getName())) {
+                throw new IllegalArgumentException("Cannot unify constants with different values");
+            }
+        }
+
+        private void handleVariableSubstitution(Predicate.Variable variable, Predicate.Argument argument, Map<String, Predicate.Argument> substitution) {
+            Predicate.Argument existing = substitution.get(variable.getName());
+            if (Objects.isNull(existing)) {
+                substitution.put(variable.getName(), argument);
+            } else if (!existing.equals(argument)) {
+                throw new IllegalArgumentException(String.format("Cannot unify a variable %s with two different constants %s %s", variable.getName(), argument.getName(), substitution.get(variable.getName()).getName()));
+            }
         }
     }
 
@@ -163,7 +237,7 @@ public class homework {
         }
 
         Expression fromString(String line) {
-            List<Atom> atoms = tokeniser.tokenise(line);
+            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
             return fromAtoms(atoms);
         }
 
@@ -309,15 +383,15 @@ public class homework {
         }
 
         private Expression handleAnd(Operand first, Operand second) {
-            Expression cnfFirst = toCNF(first);
-            Expression cnfSecond = toCNF(second);
-            return handler.and((Operand) cnfFirst, (Operand) cnfSecond);
+            Operand cnfFirst = toCNF(first);
+            Operand cnfSecond = toCNF(second);
+            return handler.and(cnfFirst, cnfSecond);
         }
 
         private Expression handleOr(Operand first, Operand second) {
-            Expression cnfFirst = toCNF(first);
-            Expression cnfSecond = toCNF(second);
-            return handler.or((Operand) cnfFirst, (Operand) cnfSecond);
+            Operand cnfFirst = toCNF(first);
+            Operand cnfSecond = toCNF(second);
+            return handler.or(cnfFirst, cnfSecond);
         }
 
         private Expression handleImplication(Operand first, Operand second) {

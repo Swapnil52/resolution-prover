@@ -5,12 +5,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HomeworkTest {
@@ -18,10 +19,13 @@ class HomeworkTest {
     private homework.ExpressionParser expressionParser;
     private homework.AlgebraHandler algebraHandler;
 
+    private homework.Unifier unifier;
+
     @BeforeEach
     void setUp() {
         this.expressionParser = new homework.ExpressionParser(new homework.Tokeniser(), new homework.AlgebraHandler());
         this.algebraHandler = new homework.AlgebraHandler();
+        this.unifier = new homework.Unifier();
     }
 
     @Test
@@ -103,9 +107,61 @@ class HomeworkTest {
     @Test
     void testCleanupWorksAsExpected() {
         homework.Sentence sentence = getCNFSentence("A(x,y)|A(x,z)|A(x,y)");
-        assertEquals("(A(x,y)|A(x,z))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0), 0).toString());
+        assertEquals("(A(x0,y0)|A(x0,z0))", expressionParser.cleanup((homework.Sentence) sentence.getExpressions().get(0), 0).toString());
         sentence = (homework.Sentence) getCNFSentence("A(x,y)|A(x,z)|~A(x,y)").getExpressions().get(0);
         assertNull(expressionParser.cleanup(sentence, 0));
+    }
+
+    @Test
+    void testGetSubstitutionWorksAsExpected() {
+        Map<String, homework.Predicate.Argument> substitution;
+
+        assertThrows(IllegalArgumentException.class, () -> unifier.getSubstitution(getPredicate("A", false, "x"), getPredicate("B", false, "x")));
+        assertThrows(IllegalArgumentException.class, () -> unifier.getSubstitution(getPredicate("A", false, "x", "y"), getPredicate("A", false, "DiffConst")));
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x"), getPredicate("A", false, "y"));
+        assertEquals(1, substitution.size());
+        assertEquals(getArgument("y"), substitution.get("x"));
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x"), getPredicate("A", false, "Const"));
+        assertEquals(1, substitution.size());
+        assertEquals(getArgument("Const"), substitution.get("x"));
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "Const"), getPredicate("A", false, "DiffConst"));
+        assertNull(substitution);
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "x"), getPredicate("A", false, "Const", "Const"));
+        assertEquals(1, substitution.size());
+        assertEquals(getArgument("Const"), substitution.get("x"));
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "y", "x"), getPredicate("A", false, "Const", "DiffConst", "DiffConst"));
+        assertNull(substitution);
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "y", "z", "x"), getPredicate("A", false, "Const", "DiffConst", "AnotherConst", "Const"));
+        assertEquals(3, substitution.size());
+        assertEquals(getArgument("Const"), substitution.get("x"));
+        assertEquals(getArgument("DiffConst"), substitution.get("y"));
+        assertEquals(getArgument("AnotherConst"), substitution.get("z"));
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "y", "z", "x"), getPredicate("A", false, "Const", "DiffConst", "AnotherConst", "w"));
+        assertNull(substitution);
+
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "y", "z", "x"), getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w"));
+        assertEquals(3, substitution.size());
+        assertEquals(getArgument("w"), substitution.get("x"));
+        assertEquals(homework.Predicate.ArgumentType.VARIABLE, substitution.get("x").getArgumentType());
+        assertEquals(getArgument("DiffConst"), substitution.get("y"));
+        assertEquals(getArgument("AnotherConst"), substitution.get("z"));
+    }
+
+    @Test
+    void testApplySubstitutionWorksAsExpected() {
+        homework.Predicate p = getPredicate("A", false, "x", "y", "z", "x");
+        homework.Predicate q = getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w");
+        Map<String, homework.Predicate.Argument> substitution = unifier.getSubstitution(p, q);
+
+        unifier.apply(p, substitution);
+        unifier.apply(q, substitution);
     }
 
     @Test
@@ -122,11 +178,19 @@ class HomeworkTest {
         return new homework.Predicate(name, Collections.singletonList(new homework.Predicate.Variable("x")), false);
     }
 
-    private homework.Predicate getPredicate(String name, boolean isNegated, String... variables) {
-        List<homework.Predicate.Argument> arguments = Arrays.stream(variables)
-                .map(homework.Predicate.Variable::new)
-                .collect(Collectors.toList());
+    private homework.Predicate getPredicate(String name, boolean isNegated, String... argumentNames) {
+        List<homework.Predicate.Argument> arguments = new ArrayList<>();
+        for (String argumentName : argumentNames) {
+            arguments.add(getArgument(argumentName));
+        }
         return new homework.Predicate(name, arguments, isNegated);
+    }
+
+    private homework.Predicate.Argument getArgument(String name) {
+        if (Character.isUpperCase(name.charAt(0))) {
+            return new homework.Predicate.Constant(name);
+        }
+        return new homework.Predicate.Variable(name);
     }
 
     private homework.Sentence getSentence(String line) {
