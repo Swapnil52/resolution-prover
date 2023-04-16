@@ -93,9 +93,9 @@ public class homework {
 
         private final AlgebraHandler handler;
 
-        private final Map<String, Sentence> positives;
+        private final Map<String, List<Sentence>> positives;
 
-        private final Map<String, Sentence> negatives;
+        private final Map<String, List<Sentence>> negatives;
 
         private final List<Sentence> disjunctions;
 
@@ -130,10 +130,12 @@ public class homework {
                     Predicate predicate = (Predicate) expression;
                     String name = predicate.getName();
                     if (predicate.isNegated()) {
-                        this.negatives.put(name, standardised);
+                        this.negatives.putIfAbsent(name, new ArrayList<>());
+                        this.negatives.get(name).add(standardised);
                     }
                     else {
-                        this.positives.put(name, standardised);
+                        this.positives.putIfAbsent(name, new ArrayList<>());
+                        this.positives.get(name).add(standardised);
                     }
                 }
             }
