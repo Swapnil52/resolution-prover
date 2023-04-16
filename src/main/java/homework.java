@@ -28,6 +28,8 @@ public class homework {
     public static class Constants {
 
         public static final String INPUT_PATH = "input.txt";
+        private static final char CLOSE_BRACE = ')';
+        private static final char OPEN_BRACE = '(';
     }
 
     public static class Configuration {
@@ -445,9 +447,6 @@ public class homework {
 
     public static class Tokeniser {
 
-        private static final char OPEN_BRACE = '(';
-        private static final char CLOSE_BRACE = ')';
-
         public List<Atom> tokenise(String line) {
             List<Atom> expressions = new ArrayList<>();
             int i = 0;
@@ -481,12 +480,12 @@ public class homework {
 
             /* Parse predicate name */
             i = currentIndex;
-            j = sentence.indexOf(OPEN_BRACE, i);
+            j = sentence.indexOf(Constants.OPEN_BRACE, i);
             name = sentence.substring(i, j);
 
             /* Parse argument names */
             i = j + 1;
-            j = sentence.indexOf(CLOSE_BRACE, i);
+            j = sentence.indexOf(Constants.CLOSE_BRACE, i);
             argumentNames = Arrays.asList(sentence.substring(i, j).split(","));
 
             /* Add predicate to the expressions list */
