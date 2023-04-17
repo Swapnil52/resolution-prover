@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -22,25 +23,13 @@ import java.util.stream.Collectors;
 public class homework {
 
     public static void main(String[] args) throws IOException {
-        Configuration configuration = Configuration.load();
+        Configuration configuration = Configuration.load(Constants.INPUT_PATH);
         Tokeniser tokeniser = new Tokeniser();
         AlgebraHandler handler = new AlgebraHandler();
         ExpressionParser parser = new ExpressionParser(tokeniser, handler);
         Unifier unifier = new Unifier();
         KnowledgeBase base = new KnowledgeBase(configuration, parser, handler, unifier);
-
-        for (Sentence disjunction : base.disjunctions) {
-            System.out.println(disjunction);
-        }
-
-        System.out.println(base.prove2());
-    }
-
-    public static class Constants {
-
-        public static final String INPUT_PATH = "input.txt";
-        private static final char CLOSE_BRACE = ')';
-        private static final char OPEN_BRACE = '(';
+        base.prove();
     }
 
     public static class Configuration {
@@ -51,11 +40,11 @@ public class homework {
 
         private final List<String> facts;
 
-        public static Configuration load() throws IOException {
+        public static Configuration load(String path) throws IOException {
             String query;
             int size;
             List<String> facts = new ArrayList<>();
-            File file = new File(Constants.INPUT_PATH);
+            File file = new File(path);
             BufferedReader reader = new BufferedReader(new FileReader(file));
             query = reader.readLine();
             size = Integer.parseInt(reader.readLine());
@@ -132,21 +121,26 @@ public class homework {
             this.initialise();
         }
 
-        public boolean prove2() throws IOException {
-            BufferedWriter writer = new BufferedWriter(new FileWriter("output.txt", false));
-            try {
-                boolean r = prove(this.negatedQuery, writer);
-                writer.close();
-                return r;
-            }
-            catch (Exception exception) {
-                System.out.println(exception.getMessage());
-            }
+        public boolean prove() throws IOException {
+            BufferedWriter writer = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
+            boolean r = prove(this.negatedQuery, null, 0);
+            writer.write(r ? Constants.TRUE : Constants.FALSE);
             writer.close();
-            return false;
+            return r;
         }
 
-        public boolean prove(Sentence current, BufferedWriter writer) throws IOException {
+        public boolean proveLogged() throws IOException {
+            BufferedWriter writer = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
+            boolean r = prove(this.negatedQuery, writer, 0);
+            writer.write(r ? Constants.TRUE : Constants.FALSE);
+            writer.close();
+            return r;
+        }
+
+        public boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
+            if (depth > disjunctions.size()) {
+                return false;
+            }
             if (isContradiction(current)) {
                 return true;
             }
@@ -155,7 +149,7 @@ public class homework {
                 return false;
             }
             visited.add(key);
-            boolean result = false;
+            List<Sentence> resolvedSentences = new ArrayList<>();
             for (Predicate p : extractPredicates(current)) {
                 List<Sentence> candidates = getResolutionCandidates(p);
                 for (Sentence candidate : candidates) {
@@ -168,17 +162,42 @@ public class homework {
                                 Sentence gamma = unifier.apply(candidate, substitution);
                                 Sentence resolved = resolve(alpha, gamma, pSigma);
                                 if (Objects.nonNull(resolved)) {
-                                    writer.write("-----------------------------------\n");
-                                    writer.write(current + " , " + candidate + " , " + resolved + "\n");
-                                    writer.write("-----------------------------------\n");
-                                    result = result || prove(resolved, writer);
+                                    writeLog(writer, current, candidate, resolved);
+                                    resolvedSentences.add(resolved);
                                 }
                             }
                         }
                     }
                 }
             }
-            return result;
+            resolvedSentences.sort(Comparator.comparing(sentence -> sentence.getExpressions().size()));
+            for (Sentence resolvedSentence : resolvedSentences) {
+                if (prove(resolvedSentence, writer, depth + 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void writeLog(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
+            if (Objects.nonNull(writer)) {
+                writer.write("-----------------------------------\n");
+                writer.write(current + " , " + candidate + " , " + resolved + "\n");
+                writer.write("-----------------------------------\n");
+            }
+        }
+
+        public List<Sentence> getDisjunctions() {
+            return disjunctions;
+        }
+
+        private long getConstantCount(Sentence sentence) {
+            List<Predicate> predicates = extractPredicates(sentence);
+            return predicates.stream()
+                    .map(Predicate::getArguments)
+                    .flatMap(List::stream)
+                    .filter(argument -> argument.getArgumentType() == Predicate.ArgumentType.CONSTANT)
+                    .count();
         }
 
         String getKey(Sentence sentence) {
@@ -1158,6 +1177,21 @@ public class homework {
         public String toString() {
             return getLabel();
         }
+    }
+
+    public static class Constants {
+
+        public static final String INPUT_PATH = "input.txt";
+
+        public static final String OUTPUT_PATH = "output.txt";
+
+        public static final String FALSE = "FALSE";
+
+        public static final String TRUE = "TRUE";
+
+        public static final char CLOSE_BRACE = ')';
+
+        public static final char OPEN_BRACE = '(';
     }
 
     public static class Utils {

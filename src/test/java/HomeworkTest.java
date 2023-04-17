@@ -29,7 +29,7 @@ class HomeworkTest {
         this.expressionParser = new homework.ExpressionParser(new homework.Tokeniser(), new homework.AlgebraHandler());
         this.algebraHandler = new homework.AlgebraHandler();
         this.unifier = new homework.Unifier();
-        this.base = new homework.KnowledgeBase(homework.Configuration.load(), expressionParser, algebraHandler, unifier);
+        this.base = new homework.KnowledgeBase(homework.Configuration.load(null), expressionParser, algebraHandler, unifier);
     }
 
     @Test
