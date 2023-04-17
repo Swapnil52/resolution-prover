@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -21,11 +22,14 @@ class HomeworkTest {
 
     private homework.Unifier unifier;
 
+    private homework.KnowledgeBase base;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws IOException {
         this.expressionParser = new homework.ExpressionParser(new homework.Tokeniser(), new homework.AlgebraHandler());
         this.algebraHandler = new homework.AlgebraHandler();
         this.unifier = new homework.Unifier();
+        this.base = new homework.KnowledgeBase(homework.Configuration.load(), expressionParser, algebraHandler, unifier);
     }
 
     @Test
@@ -119,6 +123,11 @@ class HomeworkTest {
         assertThrows(IllegalArgumentException.class, () -> unifier.getSubstitution(getPredicate("A", false, "x"), getPredicate("B", false, "x")));
         assertThrows(IllegalArgumentException.class, () -> unifier.getSubstitution(getPredicate("A", false, "x", "y"), getPredicate("A", false, "DiffConst")));
 
+        substitution = unifier.getSubstitution(getPredicate("A", false, "x", "Const"), getPredicate("A", false, "y", "z"));
+        assertEquals(2, substitution.size());
+        assertEquals(getArgument("y"), substitution.get("x"));
+        assertEquals(getArgument("Const"), substitution.get("z"));
+
         substitution = unifier.getSubstitution(getPredicate("A", false, "x"), getPredicate("A", false, "y"));
         assertEquals(1, substitution.size());
         assertEquals(getArgument("y"), substitution.get("x"));
@@ -160,8 +169,55 @@ class HomeworkTest {
         homework.Predicate q = getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w");
         Map<String, homework.Predicate.Argument> substitution = unifier.getSubstitution(p, q);
 
-        unifier.apply(p, substitution);
-        unifier.apply(q, substitution);
+        homework.Predicate unified = unifier.apply(p, substitution);
+        assertEquals(getPredicate("A", false, "w", "DiffConst", "AnotherConst", "w"), unified);
+
+        unified = unifier.apply(q, substitution);
+        assertEquals(getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w"), unified);
+    }
+
+    @Test
+    void testResolveWorksAsExpected() {
+        homework.Sentence a = getSentence(getPredicate("A", false, "w", "DiffConst", "AnotherConst", "w"));
+        homework.Sentence b = getSentence(getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w"));
+        homework.Predicate predicate = getPredicate("A", false, "w", "DiffConst", "AnotherConst", "w");
+        homework.Sentence resolved = base.resolve(a, b, predicate);
+        assertNull(resolved);
+
+        b = getSentence(
+                getPredicate("A", true, "w", "DiffConst", "AnotherConst", "w"),
+                homework.Operator.OR,
+                getPredicate("B", true, "w", "DiffConst", "AnotherConst", "w")
+        );
+        resolved = base.resolve(a, b, predicate);
+        System.out.println(resolved);
+    }
+
+    @Test
+    void testGetSentenceKeyWorksAsExpected() {
+        homework.Sentence a = getSentence(
+                getPredicate("A", true, "x", "DiffConst", "AnotherConst", "y"),
+                homework.Operator.OR,
+                getPredicate("B", true, "z", "DiffConst", "AnotherConst", "z")
+        );
+        homework.Sentence b = getSentence(
+                getPredicate("B", true, "c", "DiffConst", "AnotherConst", "c"),
+                homework.Operator.OR,
+                getPredicate("A", false, "a", "DiffConst", "AnotherConst", "b")
+        );
+        assertEquals(base.getKey(a), base.getKey(b));
+
+        a = getSentence(
+                getPredicate("A", true, "x", "DiffConst", "AnotherConst", "y"),
+                homework.Operator.OR,
+                getPredicate("B", true, "z", "DiffConst", "AnotherConst", "z")
+        );
+        b = getSentence(
+                getPredicate("B", true, "c", "DiffConst", "AnotherConst", "c"),
+                homework.Operator.OR,
+                getPredicate("C", true, "a", "DiffConst", "AnotherConst", "b")
+        );
+        assertNotEquals(base.getKey(a), base.getKey(b));
     }
 
     @Test

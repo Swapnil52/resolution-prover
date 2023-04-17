@@ -1,10 +1,15 @@
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -21,8 +26,14 @@ public class homework {
         Tokeniser tokeniser = new Tokeniser();
         AlgebraHandler handler = new AlgebraHandler();
         ExpressionParser parser = new ExpressionParser(tokeniser, handler);
-        KnowledgeBase base = new KnowledgeBase(configuration, parser, handler);
-        System.out.println(base);
+        Unifier unifier = new Unifier();
+        KnowledgeBase base = new KnowledgeBase(configuration, parser, handler, unifier);
+
+        for (Sentence disjunction : base.disjunctions) {
+            System.out.println(disjunction);
+        }
+
+        System.out.println(base.prove2());
     }
 
     public static class Constants {
@@ -93,27 +104,113 @@ public class homework {
 
         private final AlgebraHandler handler;
 
+        private final Unifier unifier;
+
+        private final Sentence negatedQuery;
+
         private final Map<String, List<Sentence>> positives;
 
         private final Map<String, List<Sentence>> negatives;
+
+        private final Set<String> visited;
 
         private final List<Sentence> disjunctions;
 
         private int size;
 
-        public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler) {
+        public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler, Unifier unifier) {
             this.configuration = configuration;
             this.parser = parser;
             this.handler = handler;
-            this.disjunctions = new ArrayList<>();
+            this.unifier = unifier;
+            this.negatedQuery = getNegatedQuery();
             this.positives = new HashMap<>();
             this.negatives = new HashMap<>();
+            this.visited = new HashSet<>();
+            this.disjunctions = new ArrayList<>();
             this.size = 0;
             this.initialise();
         }
 
+        public boolean prove2() throws IOException {
+            BufferedWriter writer = new BufferedWriter(new FileWriter("output.txt", false));
+            try {
+                boolean r = prove(this.negatedQuery, writer);
+                writer.close();
+                return r;
+            }
+            catch (Exception exception) {
+                System.out.println(exception.getMessage());
+            }
+            writer.close();
+            return false;
+        }
+
+        public boolean prove(Sentence current, BufferedWriter writer) throws IOException {
+            if (isContradiction(current)) {
+                return true;
+            }
+            String key = getKey(current);
+            if (visited.contains(key)) {
+                return false;
+            }
+            visited.add(key);
+            boolean result = false;
+            for (Predicate p : extractPredicates(current)) {
+                List<Sentence> candidates = getResolutionCandidates(p);
+                for (Sentence candidate : candidates) {
+                    for (Predicate q : extractPredicates(candidate)) {
+                        if (p.getName().equals(q.getName())) {
+                            Map<String, Predicate.Argument> substitution = unifier.getSubstitution(p, q);
+                            if (Objects.nonNull(substitution) && !substitution.isEmpty()) {
+                                Predicate pSigma = unifier.apply(p, substitution);
+                                Sentence alpha = unifier.apply(current, substitution);
+                                Sentence gamma = unifier.apply(candidate, substitution);
+                                Sentence resolved = resolve(alpha, gamma, pSigma);
+                                if (Objects.nonNull(resolved)) {
+                                    writer.write("-----------------------------------\n");
+                                    writer.write(current + " , " + candidate + " , " + resolved + "\n");
+                                    writer.write("-----------------------------------\n");
+                                    result = result || prove(resolved, writer);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        String getKey(Sentence sentence) {
+            Map<String, String> varnames = new HashMap<>();
+            List<Predicate> predicates = extractPredicates(sentence);
+            predicates.sort(Comparator.comparing(Predicate::getName));
+            StringBuilder builder = new StringBuilder();
+            for (Predicate predicate : predicates) {
+                String arguments = predicate.getArguments().stream()
+                        .map(argument -> getArgumentKey(argument, varnames))
+                        .collect(Collectors.joining(","));
+                if (predicate.isNegated()) {
+                    builder.append("~");
+                }
+                builder.append(String.format("%s(%s)", predicate.getName(), arguments));
+            }
+            return builder.toString();
+        }
+
+        private String getArgumentKey(Predicate.Argument argument, Map<String, String> varnames) {
+            if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
+                return argument.getName();
+            }
+            else if (varnames.containsKey(argument.getName())) {
+                return varnames.get(argument.getName());
+            }
+            varnames.put(argument.getName(), "var" + varnames.size());
+            return varnames.get(argument.getName());
+        }
+
         private void initialise() {
-            index(getNegatedQuery());
+            index(this.negatedQuery);
             for (String fact : configuration.getFacts()) {
                 List<Sentence> disjunctions = getDisjunctions(fact);
                 for (Sentence disjunction : disjunctions) {
@@ -121,6 +218,84 @@ public class homework {
                 }
             }
         }
+
+        private boolean isContradiction(Sentence sentence) {
+            if (!isUnary(sentence)) {
+                return false;
+            }
+            Predicate p = (Predicate) sentence.getExpressions().get(0);
+            List<Sentence> candidates = getContradictionCandidates(p);
+            for (Sentence candidate : candidates) {
+                Predicate q = (Predicate) candidate.getExpressions().get(0);
+                if (Objects.nonNull(unifier.getSubstitution(p, q))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private List<Sentence> getContradictionCandidates(Predicate predicate) {
+            if (predicate.isNegated()) {
+                return Utils.emptyIfNull(this.positives.get(predicate.getName())).stream()
+                        .filter(this::isUnary)
+                        .collect(Collectors.toList());
+            }
+            return Utils.emptyIfNull(this.negatives.get(predicate.getName())).stream()
+                    .filter(this::isUnary)
+                    .collect(Collectors.toList());
+        }
+
+        private boolean isUnary(Sentence sentence) {
+            return sentence.getExpressions().size() == 1;
+        }
+
+        private List<Predicate> extractPredicates(Sentence sentence) {
+            return sentence.getExpressions().stream()
+                    .filter(expression -> expression.getType() == ExpressionType.PREDICATE)
+                    .map(expression -> (Predicate) expression)
+                    .collect(Collectors.toList());
+        }
+
+        private List<Sentence> getResolutionCandidates(Predicate predicate) {
+            if (predicate.isNegated()) {
+                return Utils.emptyIfNull(this.positives.get(predicate.getName()));
+            }
+            return Utils.emptyIfNull(this.negatives.get(predicate.getName()));
+        }
+
+        Sentence resolve(Sentence a, Sentence b, Predicate predicate) {
+            List<Predicate> aPredicates = extractPredicates(a).stream()
+                    .filter(p -> !p.equals(predicate))
+                    .collect(Collectors.toList());
+            List<Predicate> bPredicates = extractPredicates(b).stream()
+                    .filter(p -> !p.equals(predicate))
+                    .collect(Collectors.toList());
+            List<Expression> expressions = new ArrayList<>();
+            Iterator<Predicate> iterator = aPredicates.iterator();
+            if (iterator.hasNext()) {
+                expressions.add(iterator.next());
+                while (iterator.hasNext()) {
+                    expressions.add(Operator.OR);
+                    expressions.add(iterator.next());
+                }
+            }
+            if (!expressions.isEmpty()) {
+                expressions.add(Operator.OR);
+            }
+            iterator = bPredicates.iterator();
+            if (iterator.hasNext()) {
+                expressions.add(iterator.next());
+                while (iterator.hasNext()) {
+                    expressions.add(Operator.OR);
+                    expressions.add(iterator.next());
+                }
+            }
+            if (expressions.isEmpty()) {
+                return null;
+            }
+            return parser.cleanup(new Sentence(expressions));
+        }
+
 
         private void index(Sentence disjunction) {
             Sentence standardised = this.parser.standardise(disjunction, this.size);
@@ -178,7 +353,7 @@ public class homework {
                     Predicate.Argument a = p.getArguments().get(i);
                     Predicate.Argument b = q.getArguments().get(i);
                     if (a.getArgumentType() == Predicate.ArgumentType.CONSTANT && b.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
-                        handleConstantSubstitution((Predicate.Constant) a, (Predicate.Constant) b);
+                        handleConstantSubstitution((Predicate.Constant) a, (Predicate.Constant) b, substitution);
                     }
                     else if (a.getArgumentType() == Predicate.ArgumentType.VARIABLE) {
                         handleVariableSubstitution((Predicate.Variable) a, b, substitution);
@@ -193,28 +368,38 @@ public class homework {
             }
         }
 
-        public void apply(Sentence sentence, Map<String, Predicate.Argument> substitution) {
+        public Sentence apply(Sentence sentence, Map<String, Predicate.Argument> substitution) {
+            List<Expression> expressions = new ArrayList<>();
             for (Expression expression : sentence.getExpressions()) {
+                if (expression.getType() == ExpressionType.OPERATOR) {
+                    expressions.add(expression);
+                }
                 if (expression.getType() == ExpressionType.PREDICATE) {
                     Predicate predicate = (Predicate) expression;
-                    apply(predicate, substitution);
+                    expressions.add(apply(predicate, substitution));
                 }
             }
+            return new Sentence(expressions);
         }
 
-        void apply(Predicate predicate, Map<String, Predicate.Argument> substitution) {
-            for (int i = 0; i < predicate.getArguments().size(); i++) {
-                Predicate.Argument argument = predicate.arguments.get(i);
+        Predicate apply(Predicate predicate, Map<String, Predicate.Argument> substitution) {
+            List<Predicate.Argument> arguments = new ArrayList<>();
+            for (Predicate.Argument argument : predicate.getArguments()) {
                 if (argument.getArgumentType() == Predicate.ArgumentType.VARIABLE && substitution.containsKey(argument.getName())) {
-                    predicate.getArguments().set(i, substitution.get(argument.getName()));
+                    arguments.add(substitution.get(argument.getName()));
+                }
+                else {
+                    arguments.add(argument);
                 }
             }
+            return new Predicate(predicate.getName(), arguments, predicate.isNegated());
         }
 
-        private void handleConstantSubstitution(Predicate.Constant a, Predicate.Constant b) {
+        private void handleConstantSubstitution(Predicate.Constant a, Predicate.Constant b, Map<String, Predicate.Argument> substitution) {
             if (!a.getName().equals(b.getName())) {
                 throw new IllegalArgumentException("Cannot unify constants with different values");
             }
+            substitution.put(a.getName(), b);
         }
 
         private void handleVariableSubstitution(Predicate.Variable variable, Predicate.Argument argument, Map<String, Predicate.Argument> substitution) {
@@ -972,6 +1157,16 @@ public class homework {
         @Override
         public String toString() {
             return getLabel();
+        }
+    }
+
+    public static class Utils {
+
+        public static <E> List<E> emptyIfNull(List<E> list) {
+            if (Objects.isNull(list)) {
+                return Collections.emptyList();
+            }
+            return list;
         }
     }
 }
