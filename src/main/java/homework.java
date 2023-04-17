@@ -138,7 +138,7 @@ public class homework {
         }
 
         public boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
-            if (depth > disjunctions.size()) {
+            if (depth > getMaxDepth()) {
                 return false;
             }
             if (isContradiction(current)) {
@@ -177,6 +177,10 @@ public class homework {
                 }
             }
             return false;
+        }
+
+        private int getMaxDepth() {
+            return getDisjunctions().size();
         }
 
         private void writeLog(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
