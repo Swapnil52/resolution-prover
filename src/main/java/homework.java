@@ -149,7 +149,7 @@ public class homework {
                 return false;
             }
             visited.add(key);
-            List<Sentence> resolvedSentences = new ArrayList<>();
+            List<ResolutionResult> resolutionResults = new ArrayList<>();
             for (Predicate p : extractPredicates(current)) {
                 List<Sentence> candidates = getResolutionCandidates(p);
                 for (Sentence candidate : candidates) {
@@ -162,17 +162,17 @@ public class homework {
                                 Sentence gamma = unifier.apply(candidate, substitution);
                                 Sentence resolved = resolve(alpha, gamma, pSigma);
                                 if (Objects.nonNull(resolved)) {
-                                    writeLog(writer, current, candidate, resolved);
-                                    resolvedSentences.add(resolved);
+                                    resolutionResults.add(ResolutionResult.of(candidate, resolved));
                                 }
                             }
                         }
                     }
                 }
             }
-            resolvedSentences.sort(Comparator.comparing(sentence -> sentence.getExpressions().size()));
-            for (Sentence resolvedSentence : resolvedSentences) {
-                if (prove(resolvedSentence, writer, depth + 1)) {
+            resolutionResults.sort(Comparator.comparing(result -> result.getResolved().getExpressions().size()));
+            for (ResolutionResult result : resolutionResults) {
+                log(writer, current, result.getCandidate(), result.getResolved());
+                if (prove(result.getResolved(), writer, depth + 1)) {
                     return true;
                 }
             }
@@ -183,7 +183,7 @@ public class homework {
             return getDisjunctions().size();
         }
 
-        private void writeLog(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
+        private void log(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
             if (Objects.nonNull(writer)) {
                 writer.write("-----------------------------------\n");
                 writer.write(current + " , " + candidate + " , " + resolved + "\n");
@@ -349,6 +349,30 @@ public class homework {
         private List<Sentence> getDisjunctions(String line) {
             Sentence cnf = parser.toCNF(line);
             return parser.splitAndCleanup(cnf);
+        }
+
+        private static class ResolutionResult {
+
+            private final Sentence candidate;
+
+            private final Sentence resolved;
+
+            private ResolutionResult(Sentence candidate, Sentence resolved) {
+                this.candidate = candidate;
+                this.resolved = resolved;
+            }
+
+            public static ResolutionResult of(Sentence candidate, Sentence resolved) {
+                return new ResolutionResult(candidate, resolved);
+            }
+
+            public Sentence getCandidate() {
+                return candidate;
+            }
+
+            public Sentence getResolved() {
+                return resolved;
+            }
         }
 
         @Override
