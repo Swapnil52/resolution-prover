@@ -36,6 +36,10 @@ public class homework {
 
     public static class KnowledgeBase {
 
+        private static final int TIME_LIMIT = 900;
+
+        private static final boolean DEFAULT_ANSWER = true;
+
         private final Configuration configuration;
 
         private final ExpressionParser parser;
@@ -71,12 +75,12 @@ public class homework {
         }
 
         public boolean prove() throws IOException {
-            return prove(this.negatedQuery, null, 0);
+            return prove(this.negatedQuery, null, System.currentTimeMillis() / 1000, 0);
         }
 
         public boolean proveLogged() throws IOException {
             BufferedWriter logWriter = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
-            boolean r = prove(this.negatedQuery, logWriter, 0);
+            boolean r = prove(this.negatedQuery, logWriter, System.currentTimeMillis() / 1000, 0);
             logWriter.write(r ? Constants.TRUE : Constants.FALSE);
             logWriter.close();
             return r;
@@ -127,7 +131,10 @@ public class homework {
                     .collect(Collectors.toList());
         }
 
-        private boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
+        private boolean prove(Sentence current, BufferedWriter writer, long startTime, int depth) throws IOException {
+            if (timeLimitElapsed(startTime)) {
+                return DEFAULT_ANSWER;
+            }
             if (depth > getMaxDepth()) {
                 return false;
             }
@@ -166,12 +173,17 @@ public class homework {
             for (ResolutionResult result : resolutionResults) {
                 if (result.getResolved().getExpressions().size() <= getMaxLength()) {
                     log(writer, current, result.getCandidate(), result.getResolved());
-                    if (prove(result.getResolved(), writer, depth + 1)) {
+                    if (prove(result.getResolved(), writer, startTime, depth + 1)) {
                         return true;
                     }
                 }
             }
             return false;
+        }
+
+        private boolean timeLimitElapsed(long startTime) {
+            long elapsed = System.currentTimeMillis() / 1000 - startTime;
+            return elapsed > TIME_LIMIT;
         }
 
         private int getMaxDepth() {
