@@ -388,6 +388,32 @@ public class homework {
             }
         }
 
+        private static class SentenceKey {
+
+            private final Set<String> predicateKeys;
+
+            private SentenceKey(Set<String> predicateKeys) {
+                this.predicateKeys = predicateKeys;
+            }
+
+            public Set<String> getPredicateKeys() {
+                return predicateKeys;
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                SentenceKey that = (SentenceKey) o;
+                return Objects.equals(predicateKeys, that.predicateKeys);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(predicateKeys);
+            }
+        }
+
         @Override
         public String toString() {
             StringBuilder builder = new StringBuilder();
@@ -1233,6 +1259,8 @@ public class homework {
         public static final char CLOSE_BRACE = ')';
 
         public static final char OPEN_BRACE = '(';
+
+        public static final String VAR = "var";
     }
 
     public static class Utils {
