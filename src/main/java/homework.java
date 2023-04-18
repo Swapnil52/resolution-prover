@@ -23,13 +23,15 @@ import java.util.stream.Collectors;
 public class homework {
 
     public static void main(String[] args) throws IOException {
-        Configuration configuration = Configuration.load(Constants.INPUT_PATH);
+        FileHandler fileHandler = new FileHandler();
+        Configuration configuration = fileHandler.load(Constants.INPUT_PATH);
         Tokeniser tokeniser = new Tokeniser();
         AlgebraHandler handler = new AlgebraHandler();
         ExpressionParser parser = new ExpressionParser(tokeniser, handler);
         Unifier unifier = new Unifier();
         KnowledgeBase base = new KnowledgeBase(configuration, parser, handler, unifier);
-        base.prove();
+        boolean result = base.prove();
+        fileHandler.writeOutput(result, Constants.OUTPUT_PATH);
     }
 
     public static class Configuration {
@@ -39,21 +41,6 @@ public class homework {
         private final int size;
 
         private final List<String> facts;
-
-        public static Configuration load(String path) throws IOException {
-            String query;
-            int size;
-            List<String> facts = new ArrayList<>();
-            File file = new File(path);
-            BufferedReader reader = new BufferedReader(new FileReader(file));
-            query = reader.readLine();
-            size = Integer.parseInt(reader.readLine());
-            for (int i = 0; i < size; i++) {
-                facts.add(reader.readLine());
-            }
-            reader.close();
-            return new Configuration(query, size, facts);
-        }
 
         public Configuration(String query, int size, List<String> facts) {
             this.size = size;
@@ -78,6 +65,31 @@ public class homework {
                 builder.append(String.format("%s\n", fact));
             }
             return builder.toString();
+        }
+    }
+
+    public static class FileHandler {
+
+        public Configuration load(String path) throws IOException {
+            String query;
+            int size;
+            List<String> facts = new ArrayList<>();
+            File file = new File(path);
+            BufferedReader reader = new BufferedReader(new FileReader(file));
+            query = reader.readLine();
+            size = Integer.parseInt(reader.readLine());
+            for (int i = 0; i < size; i++) {
+                facts.add(reader.readLine());
+            }
+            reader.close();
+            return new Configuration(query, size, facts);
+        }
+
+        public void writeOutput(boolean result, String path) throws IOException {
+            String resultString = result ? "TRUE" : "FALSE";
+            BufferedWriter writer = new BufferedWriter(new FileWriter(path, false));
+            writer.write(resultString);
+            writer.close();
         }
     }
 
@@ -689,22 +701,63 @@ public class homework {
         }
 
         public boolean prove() throws IOException {
-            BufferedWriter writer = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
-            boolean r = prove(this.negatedQuery, null, 0);
-            writer.write(r ? Constants.TRUE : Constants.FALSE);
-            writer.close();
-            return r;
+            return prove(this.negatedQuery, null, 0);
         }
 
         public boolean proveLogged() throws IOException {
-            BufferedWriter writer = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
-            boolean r = prove(this.negatedQuery, writer, 0);
-            writer.write(r ? Constants.TRUE : Constants.FALSE);
-            writer.close();
+            BufferedWriter logWriter = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
+            boolean r = prove(this.negatedQuery, logWriter, 0);
+            logWriter.write(r ? Constants.TRUE : Constants.FALSE);
+            logWriter.close();
             return r;
         }
 
-        public boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
+        public List<Sentence> getDisjunctions() {
+            return disjunctions;
+        }
+
+        private Sentence getNegatedQuery() {
+            Predicate query = (Predicate) parser.fromString(configuration.getQuery());
+            Predicate negation = handler.negatePredicate(query);
+            return handler.flatten(negation);
+        }
+
+        private void populateIndex() {
+            index(this.negatedQuery);
+            for (String fact : configuration.getFacts()) {
+                List<Sentence> disjunctions = getDisjunctions(fact);
+                for (Sentence disjunction : disjunctions) {
+                    index(disjunction);
+                }
+            }
+        }
+
+        private void index(Sentence disjunction) {
+            Sentence standardised = this.parser.standardise(disjunction, this.size);
+            this.disjunctions.add(standardised);
+            List<Predicate> predicates = extractPredicates(standardised);
+            for (Predicate predicate : predicates) {
+                String name = predicate.getName();
+                if (predicate.isNegated()) {
+                    this.negatives.putIfAbsent(name, new ArrayList<>());
+                    this.negatives.get(name).add(standardised);
+                }
+                else {
+                    this.positives.putIfAbsent(name, new ArrayList<>());
+                    this.positives.get(name).add(standardised);
+                }
+            }
+            this.size++;
+        }
+
+        private List<Predicate> extractPredicates(Sentence sentence) {
+            return sentence.getExpressions().stream()
+                    .filter(expression -> expression.getType() == ExpressionType.PREDICATE)
+                    .map(expression -> (Predicate) expression)
+                    .collect(Collectors.toList());
+        }
+
+        private boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
             if (depth > getMaxDepth()) {
                 return false;
             }
@@ -749,46 +802,6 @@ public class homework {
                 }
             }
             return false;
-        }
-
-        private Sentence getNegatedQuery() {
-            Predicate query = (Predicate) parser.fromString(configuration.getQuery());
-            Predicate negation = handler.negatePredicate(query);
-            return handler.flatten(negation);
-        }
-
-        private void populateIndex() {
-            index(this.negatedQuery);
-            for (String fact : configuration.getFacts()) {
-                List<Sentence> disjunctions = getDisjunctions(fact);
-                for (Sentence disjunction : disjunctions) {
-                    index(disjunction);
-                }
-            }
-        }
-
-        private void index(Sentence disjunction) {
-            Sentence standardised = this.parser.standardise(disjunction, this.size);
-            this.disjunctions.add(standardised);
-            for (Expression expression : standardised.getExpressions()) {
-                if (expression.getType() == ExpressionType.PREDICATE) {
-                    Predicate predicate = (Predicate) expression;
-                    String name = predicate.getName();
-                    if (predicate.isNegated()) {
-                        this.negatives.putIfAbsent(name, new ArrayList<>());
-                        this.negatives.get(name).add(standardised);
-                    }
-                    else {
-                        this.positives.putIfAbsent(name, new ArrayList<>());
-                        this.positives.get(name).add(standardised);
-                    }
-                }
-            }
-            this.size++;
-        }
-
-        public List<Sentence> getDisjunctions() {
-            return disjunctions;
         }
 
         private int getMaxDepth() {
@@ -851,13 +864,6 @@ public class homework {
             }
             varnames.put(argument.getName(), "var" + varnames.size());
             return varnames.get(argument.getName());
-        }
-
-        private List<Predicate> extractPredicates(Sentence sentence) {
-            return sentence.getExpressions().stream()
-                    .filter(expression -> expression.getType() == ExpressionType.PREDICATE)
-                    .map(expression -> (Predicate) expression)
-                    .collect(Collectors.toList());
         }
 
         private List<Sentence> getResolutionCandidates(Predicate predicate) {

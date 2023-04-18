@@ -5,7 +5,7 @@ import java.io.IOException;
 public class HomeworkTestRunner {
 
     public static void main(String[] args) throws IOException {
-        runAllTests(true);
+        runAllTests(false);
 //        runTestCase(5, true);
     }
 
@@ -21,7 +21,8 @@ public class HomeworkTestRunner {
     private static void runTestCase(int testCaseNumber, boolean printKB) throws IOException {
         System.out.printf("------------Running test case %d------------%n", testCaseNumber);
         String inputPath = getInputPath(testCaseNumber);
-        homework.Configuration configuration = homework.Configuration.load(inputPath);
+        homework.FileHandler fileHandler = new homework.FileHandler();
+        homework.Configuration configuration = fileHandler.load(inputPath);
         homework.Tokeniser tokeniser = new homework.Tokeniser();
         homework.AlgebraHandler handler = new homework.AlgebraHandler();
         homework.ExpressionParser parser = new homework.ExpressionParser(tokeniser, handler);
@@ -36,6 +37,9 @@ public class HomeworkTestRunner {
         String resultString = result ? "TRUE" : "FALSE";
         if (resultString.equals(getExpectedOutput(testCaseNumber))) {
             System.out.println("TEST CASE PASSED!");
+        }
+        else {
+            System.out.println("TEST CASE FAILED!");
         }
         System.out.println(result);
         System.out.printf("------------Ending test case %d------------%n", testCaseNumber);
