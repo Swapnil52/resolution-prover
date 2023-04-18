@@ -55,7 +55,7 @@ public class homework {
             return new Configuration(query, size, facts);
         }
 
-        private Configuration(String query, int size, List<String> facts) {
+        public Configuration(String query, int size, List<String> facts) {
             this.size = size;
             this.query = query;
             this.facts = facts;
@@ -63,10 +63,6 @@ public class homework {
 
         public String getQuery() {
             return query;
-        }
-
-        public int getSize() {
-            return size;
         }
 
         public List<String> getFacts() {
@@ -206,15 +202,6 @@ public class homework {
 
         public List<Sentence> getDisjunctions() {
             return disjunctions;
-        }
-
-        private long getConstantCount(Sentence sentence) {
-            List<Predicate> predicates = extractPredicates(sentence);
-            return predicates.stream()
-                    .map(Predicate::getArguments)
-                    .flatMap(List::stream)
-                    .filter(argument -> argument.getArgumentType() == Predicate.ArgumentType.CONSTANT)
-                    .count();
         }
 
         String getKey(Sentence sentence) {
@@ -385,32 +372,6 @@ public class homework {
 
             public Sentence getResolved() {
                 return resolved;
-            }
-        }
-
-        private static class SentenceKey {
-
-            private final Set<String> predicateKeys;
-
-            private SentenceKey(Set<String> predicateKeys) {
-                this.predicateKeys = predicateKeys;
-            }
-
-            public Set<String> getPredicateKeys() {
-                return predicateKeys;
-            }
-
-            @Override
-            public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                SentenceKey that = (SentenceKey) o;
-                return Objects.equals(predicateKeys, that.predicateKeys);
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(predicateKeys);
             }
         }
 

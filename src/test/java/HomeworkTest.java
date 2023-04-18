@@ -29,7 +29,7 @@ class HomeworkTest {
         this.expressionParser = new homework.ExpressionParser(new homework.Tokeniser(), new homework.AlgebraHandler());
         this.algebraHandler = new homework.AlgebraHandler();
         this.unifier = new homework.Unifier();
-        this.base = new homework.KnowledgeBase(homework.Configuration.load(null), expressionParser, algebraHandler, unifier);
+        this.base = new homework.KnowledgeBase(getConfiguration(), expressionParser, algebraHandler, unifier);
     }
 
     @Test
@@ -203,7 +203,7 @@ class HomeworkTest {
         homework.Sentence b = getSentence(
                 getPredicate("B", true, "c", "DiffConst", "AnotherConst", "c"),
                 homework.Operator.OR,
-                getPredicate("A", false, "a", "DiffConst", "AnotherConst", "b")
+                getPredicate("A", true, "a", "DiffConst", "AnotherConst", "b")
         );
         assertEquals(base.getKey(a), base.getKey(b));
 
@@ -260,5 +260,11 @@ class HomeworkTest {
     private homework.Sentence getSentence(homework.Expression... expressions) {
         List<homework.Expression> _expressions = new ArrayList<>(Arrays.asList(expressions));
         return new homework.Sentence(_expressions);
+    }
+
+    private homework.Configuration getConfiguration() {
+        String query = "A(Teddy)";
+        List<String> facts = Collections.singletonList("A(x)|~B(x)");
+        return new homework.Configuration(query, 1, facts);
     }
 }

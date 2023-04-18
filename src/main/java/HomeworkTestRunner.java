@@ -5,8 +5,8 @@ import java.io.IOException;
 public class HomeworkTestRunner {
 
     public static void main(String[] args) throws IOException {
-//        runAllTests(true);
-        runTestCase(5, true);
+        runAllTests(true);
+//        runTestCase(5, true);
     }
 
     private static void runAllTests(boolean printKB) throws IOException {
