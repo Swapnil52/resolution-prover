@@ -34,6 +34,303 @@ public class homework {
         fileHandler.writeOutput(result, Constants.OUTPUT_PATH);
     }
 
+    public static class KnowledgeBase {
+
+        private final Configuration configuration;
+
+        private final ExpressionParser parser;
+
+        private final AlgebraHandler handler;
+
+        private final Unifier unifier;
+
+        private final Sentence negatedQuery;
+
+        private final Map<String, List<Sentence>> positives;
+
+        private final Map<String, List<Sentence>> negatives;
+
+        private final Set<String> visited;
+
+        private final List<Sentence> disjunctions;
+
+        private int size;
+
+        public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler, Unifier unifier) {
+            this.configuration = configuration;
+            this.parser = parser;
+            this.handler = handler;
+            this.unifier = unifier;
+            this.negatedQuery = getNegatedQuery();
+            this.positives = new HashMap<>();
+            this.negatives = new HashMap<>();
+            this.visited = new HashSet<>();
+            this.disjunctions = new ArrayList<>();
+            this.size = 0;
+            this.populateIndex();
+        }
+
+        public boolean prove() throws IOException {
+            return prove(this.negatedQuery, null, 0);
+        }
+
+        public boolean proveLogged() throws IOException {
+            BufferedWriter logWriter = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
+            boolean r = prove(this.negatedQuery, logWriter, 0);
+            logWriter.write(r ? Constants.TRUE : Constants.FALSE);
+            logWriter.close();
+            return r;
+        }
+
+        public List<Sentence> getDisjunctions() {
+            return disjunctions;
+        }
+
+        private Sentence getNegatedQuery() {
+            Predicate query = (Predicate) parser.fromString(configuration.getQuery());
+            Predicate negation = handler.negatePredicate(query);
+            return handler.flatten(negation);
+        }
+
+        private void populateIndex() {
+            index(this.negatedQuery);
+            for (String fact : configuration.getFacts()) {
+                List<Sentence> disjunctions = getDisjunctions(fact);
+                for (Sentence disjunction : disjunctions) {
+                    index(disjunction);
+                }
+            }
+        }
+
+        private void index(Sentence disjunction) {
+            Sentence standardised = this.parser.standardise(disjunction, this.size);
+            this.disjunctions.add(standardised);
+            List<Predicate> predicates = extractPredicates(standardised);
+            for (Predicate predicate : predicates) {
+                String name = predicate.getName();
+                if (predicate.isNegated()) {
+                    this.negatives.putIfAbsent(name, new ArrayList<>());
+                    this.negatives.get(name).add(standardised);
+                }
+                else {
+                    this.positives.putIfAbsent(name, new ArrayList<>());
+                    this.positives.get(name).add(standardised);
+                }
+            }
+            this.size++;
+        }
+
+        private List<Predicate> extractPredicates(Sentence sentence) {
+            return sentence.getExpressions().stream()
+                    .filter(expression -> expression.getType() == ExpressionType.PREDICATE)
+                    .map(expression -> (Predicate) expression)
+                    .collect(Collectors.toList());
+        }
+
+        private boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
+            if (depth > getMaxDepth()) {
+                return false;
+            }
+            if (isContradiction(current)) {
+                return true;
+            }
+            String key = getKey(current);
+            if (visited.contains(key)) {
+                return false;
+            }
+            visited.add(key);
+            List<ResolutionResult> resolutionResults = new ArrayList<>();
+            for (Predicate p : extractPredicates(current)) {
+                List<Sentence> candidates = getResolutionCandidates(p);
+                for (Sentence candidate : candidates) {
+                    for (Predicate q : extractPredicates(candidate)) {
+                        if (p.getName().equals(q.getName())) {
+                            Map<String, Predicate.Argument> substitution = unifier.getSubstitution(p, q);
+                            if (Objects.nonNull(substitution) && !substitution.isEmpty()) {
+                                Predicate pSigma = unifier.apply(p, substitution);
+                                Predicate qSigma = unifier.apply(q, substitution);
+                                if (pSigma.equals(qSigma)) {
+                                    Sentence alpha = unifier.apply(current, substitution);
+                                    Sentence gamma = unifier.apply(candidate, substitution);
+                                    Sentence resolved = resolve(alpha, gamma, pSigma);
+                                    if (Objects.nonNull(resolved)) {
+                                        resolutionResults.add(ResolutionResult.of(candidate, resolved));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            resolutionResults.sort(Comparator.comparing(result -> result.getResolved().getExpressions().size()));
+            for (ResolutionResult result : resolutionResults) {
+                if (result.getResolved().getExpressions().size() <= getMaxLength()) {
+                    log(writer, current, result.getCandidate(), result.getResolved());
+                    if (prove(result.getResolved(), writer, depth + 1)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private int getMaxDepth() {
+            return getDisjunctions().size();
+        }
+
+        private boolean isContradiction(Sentence sentence) {
+            if (!isUnary(sentence)) {
+                return false;
+            }
+            Predicate p = (Predicate) sentence.getExpressions().get(0);
+            List<Sentence> candidates = getContradictionCandidates(p);
+            for (Sentence candidate : candidates) {
+                Predicate q = (Predicate) candidate.getExpressions().get(0);
+                if (Objects.nonNull(unifier.getSubstitution(p, q))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean isUnary(Sentence sentence) {
+            return sentence.getExpressions().size() == 1;
+        }
+
+        private List<Sentence> getContradictionCandidates(Predicate predicate) {
+            if (predicate.isNegated()) {
+                return Utils.emptyIfNull(this.positives.get(predicate.getName())).stream()
+                        .filter(this::isUnary)
+                        .collect(Collectors.toList());
+            }
+            return Utils.emptyIfNull(this.negatives.get(predicate.getName())).stream()
+                    .filter(this::isUnary)
+                    .collect(Collectors.toList());
+        }
+
+        String getKey(Sentence sentence) {
+            Map<String, String> varnames = new HashMap<>();
+            List<Predicate> predicates = extractPredicates(sentence);
+            predicates.sort(Comparator.comparing(Predicate::getName));
+            StringBuilder builder = new StringBuilder();
+            for (Predicate predicate : predicates) {
+                String arguments = predicate.getArguments().stream()
+                        .map(argument -> getArgumentKey(argument, varnames))
+                        .collect(Collectors.joining(","));
+                if (predicate.isNegated()) {
+                    builder.append("~");
+                }
+                builder.append(String.format("%s(%s)", predicate.getName(), arguments));
+            }
+            return builder.toString();
+        }
+
+        private String getArgumentKey(Predicate.Argument argument, Map<String, String> varnames) {
+            if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
+                return argument.getName();
+            }
+            else if (varnames.containsKey(argument.getName())) {
+                return varnames.get(argument.getName());
+            }
+            varnames.put(argument.getName(), Constants.VAR + varnames.size());
+            return varnames.get(argument.getName());
+        }
+
+        private List<Sentence> getResolutionCandidates(Predicate predicate) {
+            if (predicate.isNegated()) {
+                return Utils.emptyIfNull(this.positives.get(predicate.getName()));
+            }
+            return Utils.emptyIfNull(this.negatives.get(predicate.getName()));
+        }
+
+        private int getMaxLength() {
+            int maxLength = getDisjunctions().stream()
+                    .map(sentence -> sentence.getExpressions().size())
+                    .reduce(Integer::max)
+                    .orElse(0);
+            return 2 * maxLength - 1;
+        }
+
+        private void log(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
+            if (Objects.nonNull(writer)) {
+                writer.write("-----------------------------------\n");
+                writer.write(current + " , " + candidate + " , " + resolved + "\n");
+                writer.write("-----------------------------------\n");
+            }
+        }
+
+        Sentence resolve(Sentence a, Sentence b, Predicate predicate) {
+            List<Predicate> aPredicates = extractPredicates(a).stream()
+                    .filter(p -> !p.equals(predicate))
+                    .collect(Collectors.toList());
+            List<Predicate> bPredicates = extractPredicates(b).stream()
+                    .filter(p -> !p.equals(predicate))
+                    .collect(Collectors.toList());
+            List<Expression> expressions = new ArrayList<>();
+            Iterator<Predicate> iterator = aPredicates.iterator();
+            if (iterator.hasNext()) {
+                expressions.add(iterator.next());
+                while (iterator.hasNext()) {
+                    expressions.add(Operator.OR);
+                    expressions.add(iterator.next());
+                }
+            }
+            if (!expressions.isEmpty()) {
+                expressions.add(Operator.OR);
+            }
+            iterator = bPredicates.iterator();
+            if (iterator.hasNext()) {
+                expressions.add(iterator.next());
+                while (iterator.hasNext()) {
+                    expressions.add(Operator.OR);
+                    expressions.add(iterator.next());
+                }
+            }
+            if (expressions.isEmpty()) {
+                return null;
+            }
+            return parser.cleanup(new Sentence(expressions));
+        }
+
+        private List<Sentence> getDisjunctions(String line) {
+            Sentence cnf = parser.toCNF(line);
+            return parser.splitAndCleanup(cnf);
+        }
+
+        private static class ResolutionResult {
+
+            private final Sentence candidate;
+
+            private final Sentence resolved;
+
+            private ResolutionResult(Sentence candidate, Sentence resolved) {
+                this.candidate = candidate;
+                this.resolved = resolved;
+            }
+
+            public static ResolutionResult of(Sentence candidate, Sentence resolved) {
+                return new ResolutionResult(candidate, resolved);
+            }
+
+            public Sentence getCandidate() {
+                return candidate;
+            }
+
+            public Sentence getResolved() {
+                return resolved;
+            }
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder builder = new StringBuilder();
+            for (Sentence disjunction : disjunctions) {
+                builder.append(String.format("%s\n", disjunction.toString()));
+            }
+            return builder.toString();
+        }
+    }
+
     public static class Configuration {
 
         private final String query;
@@ -68,28 +365,223 @@ public class homework {
         }
     }
 
-    public static class FileHandler {
+    public static class ExpressionParser {
 
-        public Configuration load(String path) throws IOException {
-            String query;
-            int size;
-            List<String> facts = new ArrayList<>();
-            File file = new File(path);
-            BufferedReader reader = new BufferedReader(new FileReader(file));
-            query = reader.readLine();
-            size = Integer.parseInt(reader.readLine());
-            for (int i = 0; i < size; i++) {
-                facts.add(reader.readLine());
-            }
-            reader.close();
-            return new Configuration(query, size, facts);
+        private final Tokeniser tokeniser;
+
+        private final AlgebraHandler handler;
+
+        public ExpressionParser(Tokeniser tokeniser, AlgebraHandler handler) {
+            this.tokeniser = tokeniser;
+            this.handler = handler;
         }
 
-        public void writeOutput(boolean result, String path) throws IOException {
-            String resultString = result ? "TRUE" : "FALSE";
-            BufferedWriter writer = new BufferedWriter(new FileWriter(path, false));
-            writer.write(resultString);
-            writer.close();
+        public List<Sentence> splitAndCleanup(Sentence cnf) {
+            List<Sentence> disjunctions = new ArrayList<>();
+            for (Expression cnfExpression : cnf.getExpressions()) {
+                if (cnfExpression.getType() == ExpressionType.OPERATOR) {
+                    if (cnfExpression == Operator.OR) {
+                        throw new UnsupportedOperationException(String.format("Sentence %s is not in CNF", cnf));
+                    }
+                    else {
+                        continue;
+                    }
+                }
+                if (cnfExpression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) cnfExpression;
+                    Sentence disjunction = new Sentence(predicate);
+                    disjunctions.add(disjunction);
+                }
+                else if (cnfExpression.getType() == ExpressionType.SENTENCE) {
+                    Sentence cleanup = cleanup((Sentence) cnfExpression);
+                    if (Objects.nonNull(cleanup)) {
+                        disjunctions.add(cleanup);
+                    }
+                }
+            }
+            return disjunctions;
+        }
+
+        public Sentence standardise(Sentence sentence, int index) {
+            for (int i = 0; i < sentence.getExpressions().size(); i++) {
+                Expression expression = sentence.getExpressions().get(i);
+                if (expression.getType() == ExpressionType.SENTENCE) {
+                    throw new IllegalArgumentException(String.format("Sentence %s is not a pure disjunction", sentence));
+                }
+                else if (expression.getType() == ExpressionType.PREDICATE) {
+                    sentence.getExpressions().set(i, standardise((Predicate) expression, index));
+                }
+            }
+            return sentence;
+        }
+
+        public Sentence toCNF(String line) {
+            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
+            Operand operand = (Operand) fromAtoms(atoms);
+            return toCNF(operand);
+        }
+
+        Expression fromString(String line) {
+            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
+            return fromAtoms(atoms);
+        }
+
+        Sentence toCNF(Operand operand) {
+            if (handler.isCNF(operand)) {
+                return handler.flatten(operand);
+            }
+            Sentence sentence = (Sentence) operand;
+            List<Expression> postfixExpressions = toPostfix(sentence.getExpressions());
+            Stack<Expression> stack = new Stack<>();
+            for (Expression postfix : postfixExpressions) {
+                switch (postfix.getType()) {
+                    case PREDICATE:
+                    case SENTENCE:
+                        stack.add(postfix);
+                        break;
+                    case OPERATOR:
+                        Operand second = (Operand) stack.pop();
+                        Operand first = (Operand) stack.pop();
+                        Operator operator = (Operator) postfix;
+                        Expression operated = handleOperator(first, second, operator);
+                        stack.add(operated);
+                        break;
+                }
+            }
+            return handler.flatten((Operand) stack.pop());
+        }
+
+        public Sentence cleanup(Sentence disjunction) {
+            Map<String, Predicate> predicates = new HashMap<>();
+            for (Expression expression : disjunction.getExpressions()) {
+                if (expression == Operator.AND) {
+                    throw new IllegalArgumentException("Disjunction should not contain any ANDs");
+                }
+                else if (expression.getType() == ExpressionType.SENTENCE) {
+                    throw new IllegalArgumentException("Sentence must be a pure disjunction");
+                }
+                else if (expression.getType() == ExpressionType.PREDICATE) {
+                    Predicate predicate = (Predicate) expression;
+                    String key = predicate.getKey();
+                    Predicate existing = predicates.get(key);
+                    if (Objects.nonNull(existing) && existing.isNegation(predicate)) {
+                        return null;
+                    }
+                    else {
+                        predicates.put(key, predicate);
+                    }
+                }
+            }
+            List<Expression> expressions = new ArrayList<>();
+            Iterator<Predicate> iterator = predicates.values().iterator();
+            expressions.add(iterator.next());
+            while (iterator.hasNext()) {
+                Predicate predicate = iterator.next();
+                expressions.add(Operator.OR);
+                expressions.add(predicate);
+            }
+            return new Sentence(expressions);
+        }
+
+        private Predicate standardise(Predicate predicate, int index) {
+            List<Predicate.Argument> standardisedArguments = new ArrayList<>();
+            for (Predicate.Argument argument : predicate.getArguments()) {
+                if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
+                    standardisedArguments.add(argument);
+                }
+                else {
+                    String standardisedName = String.format("%s%d", argument.getName(), index);
+                    standardisedArguments.add(new Predicate.Variable(standardisedName));
+                }
+            }
+            return new Predicate(predicate.getName(), standardisedArguments, predicate.isNegated());
+        }
+
+        /**
+         * Generates a sentence from a list of atoms
+         */
+        private Expression fromAtoms(List<Atom> atoms) {
+            List<Expression> expressions = new ArrayList<>(atoms);
+            Stack<Expression> stack = new Stack<>();
+            List<Expression> postfix = toPostfix(expressions);
+            for (Expression expression : postfix) {
+                switch (expression.getType()) {
+                    case PREDICATE:
+                        stack.add(expression);
+                        break;
+                    case OPERATOR:
+                        Operator operator = (Operator) expression;
+                        Expression first = stack.pop();
+                        Expression second = stack.pop();
+                        Sentence next = new Sentence(Arrays.asList(second, operator, first));
+                        stack.add(next);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(String.format("Expression type %s is not an atom", expression.getType()));
+                }
+            }
+            return stack.pop();
+        }
+
+        private List<Expression> toPostfix(List<Expression> expressions) {
+            Stack<Operator> stack = new Stack<>();
+            List<Expression> postfix = new ArrayList<>();
+            for (Expression expression : expressions) {
+                switch (expression.getType()) {
+                    case SENTENCE:
+                    case PREDICATE:
+                        postfix.add(expression);
+                        break;
+                    case OPERATOR:
+                        Operator operator = (Operator) expression;
+                        while (!stack.isEmpty() && operator.getPrecedence() <= stack.peek().getPrecedence()) {
+                            Operator next = stack.pop();
+                            postfix.add(next);
+                        }
+                        stack.add(operator);
+                        break;
+                    default:
+                        throw new IllegalArgumentException(String.format("Expression cannot be of type %s", expression.getType()));
+                }
+            }
+            while (!stack.isEmpty()) {
+                Operator next = stack.pop();
+                postfix.add(next);
+            }
+            return postfix;
+        }
+
+        /**
+         * Operates on two expressions already in CNF
+         */
+        private Expression handleOperator(Operand first, Operand second, Operator operator) {
+            switch (operator) {
+                case AND:
+                    return handleAnd(first, second);
+                case OR:
+                    return handleOr(first, second);
+                case IMPLIES:
+                    return handleImplication(first, second);
+                default:
+                    throw new UnsupportedOperationException(String.format("Cannot apply operator %s on operables %s and %s", operator, first, second));
+            }
+        }
+
+        private Expression handleAnd(Operand first, Operand second) {
+            Operand cnfFirst = toCNF(first);
+            Operand cnfSecond = toCNF(second);
+            return handler.and(cnfFirst, cnfSecond);
+        }
+
+        private Expression handleOr(Operand first, Operand second) {
+            Operand cnfFirst = toCNF(first);
+            Operand cnfSecond = toCNF(second);
+            return handler.or(cnfFirst, cnfSecond);
+        }
+
+        private Expression handleImplication(Operand first, Operand second) {
+            Expression negated = handler.negate(first);
+            return handleOr((Operand) negated, second);
         }
     }
 
@@ -370,226 +862,6 @@ public class homework {
         }
     }
 
-    public static class ExpressionParser {
-
-        private final Tokeniser tokeniser;
-
-        private final AlgebraHandler handler;
-
-        public ExpressionParser(Tokeniser tokeniser, AlgebraHandler handler) {
-            this.tokeniser = tokeniser;
-            this.handler = handler;
-        }
-
-        public List<Sentence> splitAndCleanup(Sentence cnf) {
-            List<Sentence> disjunctions = new ArrayList<>();
-            for (Expression cnfExpression : cnf.getExpressions()) {
-                if (cnfExpression.getType() == ExpressionType.OPERATOR) {
-                    if (cnfExpression == Operator.OR) {
-                        throw new UnsupportedOperationException(String.format("Sentence %s is not in CNF", cnf));
-                    }
-                    else {
-                        continue;
-                    }
-                }
-                if (cnfExpression.getType() == ExpressionType.PREDICATE) {
-                    Predicate predicate = (Predicate) cnfExpression;
-                    Sentence disjunction = new Sentence(predicate);
-                    disjunctions.add(disjunction);
-                }
-                else if (cnfExpression.getType() == ExpressionType.SENTENCE) {
-                    Sentence cleanup = cleanup((Sentence) cnfExpression);
-                    if (Objects.nonNull(cleanup)) {
-                        disjunctions.add(cleanup);
-                    }
-                }
-            }
-            return disjunctions;
-        }
-
-        public Sentence standardise(Sentence sentence, int index) {
-            for (int i = 0; i < sentence.getExpressions().size(); i++) {
-                Expression expression = sentence.getExpressions().get(i);
-                if (expression.getType() == ExpressionType.SENTENCE) {
-                    throw new IllegalArgumentException(String.format("Sentence %s is not a pure disjunction", sentence));
-                }
-                else if (expression.getType() == ExpressionType.PREDICATE) {
-                    sentence.getExpressions().set(i, standardise((Predicate) expression, index));
-                }
-            }
-            return sentence;
-        }
-
-        public Sentence toCNF(String line) {
-            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
-            Operand operand = (Operand) fromAtoms(atoms);
-            return toCNF(operand);
-        }
-
-        Expression fromString(String line) {
-            List<Atom> atoms = tokeniser.tokenise(line.replaceAll("\\s", ""));
-            return fromAtoms(atoms);
-        }
-
-        Sentence toCNF(Operand operand) {
-            if (handler.isCNF(operand)) {
-                return handler.flatten(operand);
-            }
-            Sentence sentence = (Sentence) operand;
-            List<Expression> postfixExpressions = toPostfix(sentence.getExpressions());
-            Stack<Expression> stack = new Stack<>();
-            for (Expression postfix : postfixExpressions) {
-                switch (postfix.getType()) {
-                    case PREDICATE:
-                    case SENTENCE:
-                        stack.add(postfix);
-                        break;
-                    case OPERATOR:
-                        Operand second = (Operand) stack.pop();
-                        Operand first = (Operand) stack.pop();
-                        Operator operator = (Operator) postfix;
-                        Expression operated = handleOperator(first, second, operator);
-                        stack.add(operated);
-                        break;
-                }
-            }
-            return handler.flatten((Operand) stack.pop());
-        }
-
-        public Sentence cleanup(Sentence disjunction) {
-            Map<String, Predicate> predicates = new HashMap<>();
-            for (Expression expression : disjunction.getExpressions()) {
-                if (expression == Operator.AND) {
-                    throw new IllegalArgumentException("Disjunction should not contain any ANDs");
-                }
-                else if (expression.getType() == ExpressionType.SENTENCE) {
-                    throw new IllegalArgumentException("Sentence must be a pure disjunction");
-                }
-                else if (expression.getType() == ExpressionType.PREDICATE) {
-                    Predicate predicate = (Predicate) expression;
-                    String key = predicate.getKey();
-                    Predicate existing = predicates.get(key);
-                    if (Objects.nonNull(existing) && existing.isNegation(predicate)) {
-                        return null;
-                    }
-                    else {
-                        predicates.put(key, predicate);
-                    }
-                }
-            }
-            List<Expression> expressions = new ArrayList<>();
-            Iterator<Predicate> iterator = predicates.values().iterator();
-            expressions.add(iterator.next());
-            while (iterator.hasNext()) {
-                Predicate predicate = iterator.next();
-                expressions.add(Operator.OR);
-                expressions.add(predicate);
-            }
-            return new Sentence(expressions);
-        }
-
-        private Predicate standardise(Predicate predicate, int index) {
-            List<Predicate.Argument> standardisedArguments = new ArrayList<>();
-            for (Predicate.Argument argument : predicate.getArguments()) {
-                if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
-                    standardisedArguments.add(argument);
-                }
-                else {
-                    String standardisedName = String.format("%s%d", argument.getName(), index);
-                    standardisedArguments.add(new Predicate.Variable(standardisedName));
-                }
-            }
-            return new Predicate(predicate.getName(), standardisedArguments, predicate.isNegated());
-        }
-
-        /**
-         * Generates a sentence from a list of atoms
-         */
-        private Expression fromAtoms(List<Atom> atoms) {
-            List<Expression> expressions = new ArrayList<>(atoms);
-            Stack<Expression> stack = new Stack<>();
-            List<Expression> postfix = toPostfix(expressions);
-            for (Expression expression : postfix) {
-                switch (expression.getType()) {
-                    case PREDICATE:
-                        stack.add(expression);
-                        break;
-                    case OPERATOR:
-                        Operator operator = (Operator) expression;
-                        Expression first = stack.pop();
-                        Expression second = stack.pop();
-                        Sentence next = new Sentence(Arrays.asList(second, operator, first));
-                        stack.add(next);
-                        break;
-                    default:
-                        throw new UnsupportedOperationException(String.format("Expression type %s is not an atom", expression.getType()));
-                }
-            }
-            return stack.pop();
-        }
-
-        private List<Expression> toPostfix(List<Expression> expressions) {
-            Stack<Operator> stack = new Stack<>();
-            List<Expression> postfix = new ArrayList<>();
-            for (Expression expression : expressions) {
-                switch (expression.getType()) {
-                    case SENTENCE:
-                    case PREDICATE:
-                        postfix.add(expression);
-                        break;
-                    case OPERATOR:
-                        Operator operator = (Operator) expression;
-                        while (!stack.isEmpty() && operator.getPrecedence() <= stack.peek().getPrecedence()) {
-                            Operator next = stack.pop();
-                            postfix.add(next);
-                        }
-                        stack.add(operator);
-                        break;
-                    default:
-                        throw new IllegalArgumentException(String.format("Expression cannot be of type %s", expression.getType()));
-                }
-            }
-            while (!stack.isEmpty()) {
-                Operator next = stack.pop();
-                postfix.add(next);
-            }
-            return postfix;
-        }
-
-        /**
-         * Operates on two expressions already in CNF
-         */
-        private Expression handleOperator(Operand first, Operand second, Operator operator) {
-            switch (operator) {
-                case AND:
-                    return handleAnd(first, second);
-                case OR:
-                    return handleOr(first, second);
-                case IMPLIES:
-                    return handleImplication(first, second);
-                default:
-                    throw new UnsupportedOperationException(String.format("Cannot apply operator %s on operables %s and %s", operator, first, second));
-            }
-        }
-
-        private Expression handleAnd(Operand first, Operand second) {
-            Operand cnfFirst = toCNF(first);
-            Operand cnfSecond = toCNF(second);
-            return handler.and(cnfFirst, cnfSecond);
-        }
-
-        private Expression handleOr(Operand first, Operand second) {
-            Operand cnfFirst = toCNF(first);
-            Operand cnfSecond = toCNF(second);
-            return handler.or(cnfFirst, cnfSecond);
-        }
-
-        private Expression handleImplication(Operand first, Operand second) {
-            Expression negated = handler.negate(first);
-            return handleOr((Operand) negated, second);
-        }
-    }
-
     public static class Unifier {
 
         public Map<String, Predicate.Argument> getSubstitution(Predicate p, Predicate q) {
@@ -661,303 +933,6 @@ public class homework {
             } else if (!existing.equals(argument)) {
                 throw new IllegalArgumentException(String.format("Cannot unify a variable %s with two different constants %s %s", variable.getName(), argument.getName(), substitution.get(variable.getName()).getName()));
             }
-        }
-    }
-
-    public static class KnowledgeBase {
-
-        private final Configuration configuration;
-
-        private final ExpressionParser parser;
-
-        private final AlgebraHandler handler;
-
-        private final Unifier unifier;
-
-        private final Sentence negatedQuery;
-
-        private final Map<String, List<Sentence>> positives;
-
-        private final Map<String, List<Sentence>> negatives;
-
-        private final Set<String> visited;
-
-        private final List<Sentence> disjunctions;
-
-        private int size;
-
-        public KnowledgeBase(Configuration configuration, ExpressionParser parser, AlgebraHandler handler, Unifier unifier) {
-            this.configuration = configuration;
-            this.parser = parser;
-            this.handler = handler;
-            this.unifier = unifier;
-            this.negatedQuery = getNegatedQuery();
-            this.positives = new HashMap<>();
-            this.negatives = new HashMap<>();
-            this.visited = new HashSet<>();
-            this.disjunctions = new ArrayList<>();
-            this.size = 0;
-            this.populateIndex();
-        }
-
-        public boolean prove() throws IOException {
-            return prove(this.negatedQuery, null, 0);
-        }
-
-        public boolean proveLogged() throws IOException {
-            BufferedWriter logWriter = new BufferedWriter(new FileWriter(Constants.OUTPUT_PATH, false));
-            boolean r = prove(this.negatedQuery, logWriter, 0);
-            logWriter.write(r ? Constants.TRUE : Constants.FALSE);
-            logWriter.close();
-            return r;
-        }
-
-        public List<Sentence> getDisjunctions() {
-            return disjunctions;
-        }
-
-        private Sentence getNegatedQuery() {
-            Predicate query = (Predicate) parser.fromString(configuration.getQuery());
-            Predicate negation = handler.negatePredicate(query);
-            return handler.flatten(negation);
-        }
-
-        private void populateIndex() {
-            index(this.negatedQuery);
-            for (String fact : configuration.getFacts()) {
-                List<Sentence> disjunctions = getDisjunctions(fact);
-                for (Sentence disjunction : disjunctions) {
-                    index(disjunction);
-                }
-            }
-        }
-
-        private void index(Sentence disjunction) {
-            Sentence standardised = this.parser.standardise(disjunction, this.size);
-            this.disjunctions.add(standardised);
-            List<Predicate> predicates = extractPredicates(standardised);
-            for (Predicate predicate : predicates) {
-                String name = predicate.getName();
-                if (predicate.isNegated()) {
-                    this.negatives.putIfAbsent(name, new ArrayList<>());
-                    this.negatives.get(name).add(standardised);
-                }
-                else {
-                    this.positives.putIfAbsent(name, new ArrayList<>());
-                    this.positives.get(name).add(standardised);
-                }
-            }
-            this.size++;
-        }
-
-        private List<Predicate> extractPredicates(Sentence sentence) {
-            return sentence.getExpressions().stream()
-                    .filter(expression -> expression.getType() == ExpressionType.PREDICATE)
-                    .map(expression -> (Predicate) expression)
-                    .collect(Collectors.toList());
-        }
-
-        private boolean prove(Sentence current, BufferedWriter writer, int depth) throws IOException {
-            if (depth > getMaxDepth()) {
-                return false;
-            }
-            if (isContradiction(current)) {
-                return true;
-            }
-            String key = getKey(current);
-            if (visited.contains(key)) {
-                return false;
-            }
-            visited.add(key);
-            List<ResolutionResult> resolutionResults = new ArrayList<>();
-            for (Predicate p : extractPredicates(current)) {
-                List<Sentence> candidates = getResolutionCandidates(p);
-                for (Sentence candidate : candidates) {
-                    for (Predicate q : extractPredicates(candidate)) {
-                        if (p.getName().equals(q.getName())) {
-                            Map<String, Predicate.Argument> substitution = unifier.getSubstitution(p, q);
-                            if (Objects.nonNull(substitution) && !substitution.isEmpty()) {
-                                Predicate pSigma = unifier.apply(p, substitution);
-                                Predicate qSigma = unifier.apply(q, substitution);
-                                if (pSigma.equals(qSigma)) {
-                                    Sentence alpha = unifier.apply(current, substitution);
-                                    Sentence gamma = unifier.apply(candidate, substitution);
-                                    Sentence resolved = resolve(alpha, gamma, pSigma);
-                                    if (Objects.nonNull(resolved)) {
-                                        resolutionResults.add(ResolutionResult.of(candidate, resolved));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            resolutionResults.sort(Comparator.comparing(result -> result.getResolved().getExpressions().size()));
-            for (ResolutionResult result : resolutionResults) {
-                if (result.getResolved().getExpressions().size() <= getMaxLength()) {
-                    log(writer, current, result.getCandidate(), result.getResolved());
-                    if (prove(result.getResolved(), writer, depth + 1)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        private int getMaxDepth() {
-            return getDisjunctions().size();
-        }
-
-        private boolean isContradiction(Sentence sentence) {
-            if (!isUnary(sentence)) {
-                return false;
-            }
-            Predicate p = (Predicate) sentence.getExpressions().get(0);
-            List<Sentence> candidates = getContradictionCandidates(p);
-            for (Sentence candidate : candidates) {
-                Predicate q = (Predicate) candidate.getExpressions().get(0);
-                if (Objects.nonNull(unifier.getSubstitution(p, q))) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private boolean isUnary(Sentence sentence) {
-            return sentence.getExpressions().size() == 1;
-        }
-
-        private List<Sentence> getContradictionCandidates(Predicate predicate) {
-            if (predicate.isNegated()) {
-                return Utils.emptyIfNull(this.positives.get(predicate.getName())).stream()
-                        .filter(this::isUnary)
-                        .collect(Collectors.toList());
-            }
-            return Utils.emptyIfNull(this.negatives.get(predicate.getName())).stream()
-                    .filter(this::isUnary)
-                    .collect(Collectors.toList());
-        }
-
-        String getKey(Sentence sentence) {
-            Map<String, String> varnames = new HashMap<>();
-            List<Predicate> predicates = extractPredicates(sentence);
-            predicates.sort(Comparator.comparing(Predicate::getName));
-            StringBuilder builder = new StringBuilder();
-            for (Predicate predicate : predicates) {
-                String arguments = predicate.getArguments().stream()
-                        .map(argument -> getArgumentKey(argument, varnames))
-                        .collect(Collectors.joining(","));
-                if (predicate.isNegated()) {
-                    builder.append("~");
-                }
-                builder.append(String.format("%s(%s)", predicate.getName(), arguments));
-            }
-            return builder.toString();
-        }
-
-        private String getArgumentKey(Predicate.Argument argument, Map<String, String> varnames) {
-            if (argument.getArgumentType() == Predicate.ArgumentType.CONSTANT) {
-                return argument.getName();
-            }
-            else if (varnames.containsKey(argument.getName())) {
-                return varnames.get(argument.getName());
-            }
-            varnames.put(argument.getName(), "var" + varnames.size());
-            return varnames.get(argument.getName());
-        }
-
-        private List<Sentence> getResolutionCandidates(Predicate predicate) {
-            if (predicate.isNegated()) {
-                return Utils.emptyIfNull(this.positives.get(predicate.getName()));
-            }
-            return Utils.emptyIfNull(this.negatives.get(predicate.getName()));
-        }
-
-        private int getMaxLength() {
-            int maxLength = getDisjunctions().stream()
-                    .map(sentence -> sentence.getExpressions().size())
-                    .reduce(Integer::max)
-                    .orElse(0);
-            return 2 * maxLength - 1;
-        }
-
-        private void log(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {
-            if (Objects.nonNull(writer)) {
-                writer.write("-----------------------------------\n");
-                writer.write(current + " , " + candidate + " , " + resolved + "\n");
-                writer.write("-----------------------------------\n");
-            }
-        }
-
-        Sentence resolve(Sentence a, Sentence b, Predicate predicate) {
-            List<Predicate> aPredicates = extractPredicates(a).stream()
-                    .filter(p -> !p.equals(predicate))
-                    .collect(Collectors.toList());
-            List<Predicate> bPredicates = extractPredicates(b).stream()
-                    .filter(p -> !p.equals(predicate))
-                    .collect(Collectors.toList());
-            List<Expression> expressions = new ArrayList<>();
-            Iterator<Predicate> iterator = aPredicates.iterator();
-            if (iterator.hasNext()) {
-                expressions.add(iterator.next());
-                while (iterator.hasNext()) {
-                    expressions.add(Operator.OR);
-                    expressions.add(iterator.next());
-                }
-            }
-            if (!expressions.isEmpty()) {
-                expressions.add(Operator.OR);
-            }
-            iterator = bPredicates.iterator();
-            if (iterator.hasNext()) {
-                expressions.add(iterator.next());
-                while (iterator.hasNext()) {
-                    expressions.add(Operator.OR);
-                    expressions.add(iterator.next());
-                }
-            }
-            if (expressions.isEmpty()) {
-                return null;
-            }
-            return parser.cleanup(new Sentence(expressions));
-        }
-
-        private List<Sentence> getDisjunctions(String line) {
-            Sentence cnf = parser.toCNF(line);
-            return parser.splitAndCleanup(cnf);
-        }
-
-        private static class ResolutionResult {
-
-            private final Sentence candidate;
-
-            private final Sentence resolved;
-
-            private ResolutionResult(Sentence candidate, Sentence resolved) {
-                this.candidate = candidate;
-                this.resolved = resolved;
-            }
-
-            public static ResolutionResult of(Sentence candidate, Sentence resolved) {
-                return new ResolutionResult(candidate, resolved);
-            }
-
-            public Sentence getCandidate() {
-                return candidate;
-            }
-
-            public Sentence getResolved() {
-                return resolved;
-            }
-        }
-
-        @Override
-        public String toString() {
-            StringBuilder builder = new StringBuilder();
-            for (Sentence disjunction : disjunctions) {
-                builder.append(String.format("%s\n", disjunction.toString()));
-            }
-            return builder.toString();
         }
     }
 
@@ -1227,6 +1202,31 @@ public class homework {
         public static final char OPEN_BRACE = '(';
 
         public static final String VAR = "var";
+    }
+
+    public static class FileHandler {
+
+        public Configuration load(String path) throws IOException {
+            String query;
+            int size;
+            List<String> facts = new ArrayList<>();
+            File file = new File(path);
+            BufferedReader reader = new BufferedReader(new FileReader(file));
+            query = reader.readLine();
+            size = Integer.parseInt(reader.readLine());
+            for (int i = 0; i < size; i++) {
+                facts.add(reader.readLine());
+            }
+            reader.close();
+            return new Configuration(query, size, facts);
+        }
+
+        public void writeOutput(boolean result, String path) throws IOException {
+            String resultString = result ? "TRUE" : "FALSE";
+            BufferedWriter writer = new BufferedWriter(new FileWriter(path, false));
+            writer.write(resultString);
+            writer.close();
+        }
     }
 
     public static class Utils {
