@@ -158,11 +158,14 @@ public class homework {
                             Map<String, Predicate.Argument> substitution = unifier.getSubstitution(p, q);
                             if (Objects.nonNull(substitution) && !substitution.isEmpty()) {
                                 Predicate pSigma = unifier.apply(p, substitution);
-                                Sentence alpha = unifier.apply(current, substitution);
-                                Sentence gamma = unifier.apply(candidate, substitution);
-                                Sentence resolved = resolve(alpha, gamma, pSigma);
-                                if (Objects.nonNull(resolved)) {
-                                    resolutionResults.add(ResolutionResult.of(candidate, resolved));
+                                Predicate qSigma = unifier.apply(q, substitution);
+                                if (pSigma.equals(qSigma)) {
+                                    Sentence alpha = unifier.apply(current, substitution);
+                                    Sentence gamma = unifier.apply(candidate, substitution);
+                                    Sentence resolved = resolve(alpha, gamma, pSigma);
+                                    if (Objects.nonNull(resolved)) {
+                                        resolutionResults.add(ResolutionResult.of(candidate, resolved));
+                                    }
                                 }
                             }
                         }
@@ -171,9 +174,11 @@ public class homework {
             }
             resolutionResults.sort(Comparator.comparing(result -> result.getResolved().getExpressions().size()));
             for (ResolutionResult result : resolutionResults) {
-                log(writer, current, result.getCandidate(), result.getResolved());
-                if (prove(result.getResolved(), writer, depth + 1)) {
-                    return true;
+                if (result.getResolved().getExpressions().size() <= getMaxLength()) {
+                    log(writer, current, result.getCandidate(), result.getResolved());
+                    if (prove(result.getResolved(), writer, depth + 1)) {
+                        return true;
+                    }
                 }
             }
             return false;
@@ -181,6 +186,14 @@ public class homework {
 
         private int getMaxDepth() {
             return getDisjunctions().size();
+        }
+
+        private int getMaxLength() {
+            int maxLength = getDisjunctions().stream()
+                    .map(sentence -> sentence.getExpressions().size())
+                    .reduce(Integer::max)
+                    .orElse(0);
+            return 2 * maxLength - 1;
         }
 
         private void log(Writer writer, Sentence current, Sentence candidate, Sentence resolved) throws IOException {

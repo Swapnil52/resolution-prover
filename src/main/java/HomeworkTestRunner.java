@@ -5,20 +5,20 @@ import java.io.IOException;
 public class HomeworkTestRunner {
 
     public static void main(String[] args) throws IOException {
-        runAllTests();
-//        runTestCase(5);
+//        runAllTests(true);
+        runTestCase(5, true);
     }
 
-    private static void runAllTests() throws IOException {
+    private static void runAllTests(boolean printKB) throws IOException {
         for (int i = 1; i <= 10; i++) {
             if (i == 5) {
                 continue;
             }
-            runTestCase(i);
+            runTestCase(i, printKB);
         }
     }
 
-    private static void runTestCase(int testCaseNumber) throws IOException {
+    private static void runTestCase(int testCaseNumber, boolean printKB) throws IOException {
         System.out.printf("------------Running test case %d------------%n", testCaseNumber);
         String inputPath = getInputPath(testCaseNumber);
         homework.Configuration configuration = homework.Configuration.load(inputPath);
@@ -27,8 +27,10 @@ public class HomeworkTestRunner {
         homework.ExpressionParser parser = new homework.ExpressionParser(tokeniser, handler);
         homework.Unifier unifier = new homework.Unifier();
         homework.KnowledgeBase base = new homework.KnowledgeBase(configuration, parser, handler, unifier);
-        for (homework.Sentence disjunction : base.getDisjunctions()) {
-            System.out.println(disjunction);
+        if (printKB) {
+            for (homework.Sentence disjunction : base.getDisjunctions()) {
+                System.out.println(disjunction);
+            }
         }
         boolean result = base.proveLogged();
         String resultString = result ? "TRUE" : "FALSE";
