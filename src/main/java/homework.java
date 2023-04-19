@@ -36,7 +36,7 @@ public class homework {
 
     public static class KnowledgeBase {
 
-        private static final int TIME_LIMIT = 900;
+        private static final int TIME_LIMIT = 1140;
 
         private static final boolean DEFAULT_ANSWER = true;
 
