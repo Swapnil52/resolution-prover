@@ -1,2 +1,2 @@
 # resolution-prover
-A first-order-logic CNF converter and resolution prover written in Java.
+A framework for proving or disproving a statement, given a first-order-logic (FOL) knowledge base, using the resolution algorithm. Defines a grammar of FOL tokens (predicates, operators and sentences). Contains an algebra parser, capable of performing logical operations on FOL statements. Capable of converting complex, nested statements to conjunctive normal form (CNF), building a knowledge base of said statements, detecting cycles while proving and supports a max depth of 50 (~100 facts).
